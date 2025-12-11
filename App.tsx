@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
+import { getAnalytics } from "firebase/analytics";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, setDoc, updateDoc, increment, arrayUnion, query, where, limit, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
 import TopScreen from './components/TopScreen';
@@ -14,14 +15,16 @@ import { INITIAL_HP, HAND_SIZE, DECK_SIZE, INITIAL_UNLOCKED_CARDS, CardCatalogBy
 import LevelUpAnimation from './components/LevelUpAnimation';
 
 // Restore configuration: Use VITE_API_KEY from environment, hardcode others for public client config
+// Updated to aicardbattle2 configuration
 const firebaseConfig = {
-  // Correctly access VITE_API_KEY with fallback for safety
-  apiKey: (import.meta as any)?.env?.VITE_API_KEY || process.env.API_KEY,
-  authDomain: "aicardbattle.firebaseapp.com",
-  projectId: "aicardbattle",
-  storageBucket: "aicardbattle.firebasestorage.app",
-  messagingSenderId: "1028749273607",
-  appId: "1:1028749273607:web:f58e225bbc1fc68bea58a2"
+  // Use environment variable if available, otherwise use the new provided key for aicardbattle2
+  apiKey: (import.meta as any)?.env?.VITE_API_KEY || "AIzaSyBRExH6ECNWLfqBr8pANV4lst3tBl2fvO0",
+  authDomain: "aicardbattle2.firebaseapp.com",
+  projectId: "aicardbattle2",
+  storageBucket: "aicardbattle2.firebasestorage.app",
+  messagingSenderId: "435382299626",
+  appId: "1:435382299626:web:119dfe40779010642d2093",
+  measurementId: "G-1XYS1W9WHL"
 };
 
 // Initialize Firebase
@@ -29,14 +32,16 @@ let app;
 let auth: any;
 let db: any;
 let googleProvider: any;
+let analytics: any;
 
 try {
   app = initializeApp(firebaseConfig);
+  analytics = getAnalytics(app);
   auth = getAuth(app);
   db = getFirestore(app);
   googleProvider = new GoogleAuthProvider();
   // Debug log to confirm correct loading and trigger redeploy
-  console.log("Firebase initialized. API Key present:", !!firebaseConfig.apiKey);
+  console.log("Firebase initialized (aicardbattle2). API Key present:", !!firebaseConfig.apiKey);
 } catch (error) {
   console.warn("Firebase initialization skipped or failed. App will run in offline mode.", error);
 }

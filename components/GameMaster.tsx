@@ -1,6 +1,7 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, addDoc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import type { Room, CardData, Attribute, EffectType } from '../types';
 
 interface UserData {
@@ -20,10 +21,11 @@ interface FirestoreCardData extends CardData {
 
 interface GameMasterProps {
   db: any;
+  storage: any;
   onClose: () => void;
 }
 
-const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
+const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'rooms' | 'cards'>('users');
   const [users, setUsers] = useState<UserData[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -34,6 +36,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
   const [isNewCard, setIsNewCard] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
   const [editFormData, setEditFormData] = useState<Partial<CardData>>({});
+  const [isUploading, setIsUploading] = useState(false);
 
   // フィルター用State
   const [cardSearchTerm, setCardSearchTerm] = useState('');
@@ -218,6 +221,26 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
     }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!storage || !e.target.files || e.target.files.length === 0) return;
+    
+    const file = e.target.files[0];
+    // Create a unique filename
+    const storageRef = ref(storage, `card-images/${Date.now()}_${file.name}`);
+    
+    setIsUploading(true);
+    try {
+        const snapshot = await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(snapshot.ref);
+        setEditFormData(prev => ({ ...prev, image: url }));
+    } catch (error) {
+        console.error("Upload failed", error);
+        alert("画像のアップロードに失敗しました");
+    } finally {
+        setIsUploading(false);
+    }
+  };
+
   const formatDate = (timestamp: any) => {
     if (!timestamp) return '---';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -368,12 +391,15 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {filteredCards.map((card) => (
+                            {filteredCards.map((card) => {
+                                const isExternal = card.image.startsWith('http');
+                                const imgDisplaySrc = isExternal ? card.image : `/Image2/${card.image}`;
+                                
+                                return (
                                 <tr key={card.definitionId} className="hover:bg-gray-700/50">
                                     <td className="p-3 font-mono text-gray-300 font-bold text-center">{card.definitionId}</td>
                                     <td className="p-3">
-                                        {/* Added leading slash to src to fix preview path */}
-                                        <img src={`/Image2/${card.image}`} alt="" className="w-12 h-16 object-cover rounded border border-gray-600 bg-black" />
+                                        <img src={imgDisplaySrc} alt="" className="w-12 h-16 object-cover rounded border border-gray-600 bg-black" />
                                         <div className="text-[10px] text-gray-500 truncate w-12">{card.image}</div>
                                     </td>
                                     <td className="p-3">
@@ -398,7 +424,8 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
                                         <button onClick={() => handleDeleteCard(card)} className="bg-red-900/50 hover:bg-red-800 border border-red-800 text-red-200 px-3 py-1 rounded text-xs w-full">削除</button>
                                     </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -453,27 +480,44 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs text-gray-400 mb-1">Image Filename (in public/Image2/)</label>
-                            <input 
-                                type="text" 
-                                list="image-options"
-                                value={editFormData.image} 
-                                onChange={e => setEditFormData({...editFormData, image: e.target.value})} 
-                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white" 
-                                placeholder="ex: 1.jpeg" 
-                            />
-                            {/* 画像ファイル名の入力候補 */}
-                            <datalist id="image-options">
-                                {existingImages.map(img => (
-                                    <option key={img} value={img} />
-                                ))}
-                            </datalist>
+                            <label className="block text-xs text-gray-400 mb-1">Image Source</label>
+                            <div className="space-y-2">
+                                <input 
+                                    type="text" 
+                                    list="image-options"
+                                    value={editFormData.image} 
+                                    onChange={e => setEditFormData({...editFormData, image: e.target.value})} 
+                                    className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white text-xs" 
+                                    placeholder="filename or URL" 
+                                />
+                                <div className="flex items-center gap-2">
+                                    <label className={`text-xs px-3 py-2 rounded cursor-pointer transition-colors w-full text-center border ${isUploading ? 'bg-gray-700 text-gray-500 border-gray-700 cursor-not-allowed' : 'bg-blue-900/50 hover:bg-blue-800 border-blue-600 text-blue-200'}`}>
+                                        {isUploading ? 'Uploading...' : 'Upload Image'}
+                                        <input 
+                                            type="file" 
+                                            accept="image/*" 
+                                            onChange={handleImageUpload} 
+                                            className="hidden" 
+                                            disabled={isUploading}
+                                        />
+                                    </label>
+                                </div>
+                                <datalist id="image-options">
+                                    {existingImages.map(img => (
+                                        <option key={img} value={img} />
+                                    ))}
+                                </datalist>
+                            </div>
                         </div>
                          <div className="flex items-center justify-center bg-black/50 border border-gray-700 rounded mt-5 relative group">
                              {editFormData.image ? (
                                 <>
-                                 {/* Added leading slash to src to fix preview path */}
-                                 <img src={`/Image2/${editFormData.image}`} alt="Preview" className="h-10 object-contain" onError={(e) => (e.currentTarget.style.display='none')} />
+                                 <img 
+                                   src={editFormData.image.startsWith('http') ? editFormData.image : `/Image2/${editFormData.image}`} 
+                                   alt="Preview" 
+                                   className="h-24 object-contain" 
+                                   onError={(e) => (e.currentTarget.style.display='none')} 
+                                 />
                                  <div className="absolute inset-0 hidden group-hover:flex items-center justify-center bg-black/80 text-xs text-white p-1 rounded">
                                     Preview
                                  </div>
@@ -522,7 +566,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
 
                 <div className="p-4 border-t border-gray-700 bg-gray-900 rounded-b-lg flex justify-end gap-4">
                     <button onClick={() => setShowCardModal(false)} className="px-4 py-2 rounded text-gray-300 hover:text-white">キャンセル</button>
-                    <button onClick={saveCard} className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-6 py-2 rounded shadow">保存する</button>
+                    <button onClick={saveCard} disabled={isUploading} className={`font-bold px-6 py-2 rounded shadow ${isUploading ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-500 text-white'}`}>保存する</button>
                 </div>
             </div>
         </div>

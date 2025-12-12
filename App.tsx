@@ -4,6 +4,7 @@ import { initializeApp } from 'firebase/app';
 import { getAnalytics } from "firebase/analytics";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, setDoc, updateDoc, increment, arrayUnion, query, where, limit, getDocs, onSnapshot, runTransaction, writeBatch } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import TopScreen from './components/TopScreen';
 import DeckBuilder from './components/DeckBuilder';
 import Matchmaking from './components/Matchmaking';
@@ -31,6 +32,7 @@ const firebaseConfig = {
 let app;
 let auth: any;
 let db: any;
+let storage: any;
 let googleProvider: any;
 let analytics: any;
 
@@ -39,6 +41,7 @@ try {
   analytics = getAnalytics(app);
   auth = getAuth(app);
   db = getFirestore(app);
+  storage = getStorage(app);
   googleProvider = new GoogleAuthProvider();
   // Debug log to confirm correct loading and trigger redeploy
   console.log("Firebase initialized (aicardbattle2). API Key present:", !!firebaseConfig.apiKey);
@@ -1218,6 +1221,7 @@ const App: React.FC = () => {
             {gameState === 'gamemaster' && db && (
                 <GameMaster 
                     db={db}
+                    storage={storage}
                     onClose={() => setGameState('login_screen')}
                 />
             )}

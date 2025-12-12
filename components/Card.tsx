@@ -27,8 +27,10 @@ const Card: React.FC<CardProps> = ({
   owner = 'player'
 }) => {
   const [imageError, setImageError] = useState(false);
-  // Using absolute path for public assets
-  const imageUrl = `/Image2/${card.image}`;
+  
+  // Logic to handle both local images (legacy) and remote URLs (uploaded)
+  const isExternalUrl = card.image.startsWith('http://') || card.image.startsWith('https://');
+  const imageUrl = isExternalUrl ? card.image : `/Image2/${card.image}`;
 
   const handleImageError = () => {
     setImageError(true);

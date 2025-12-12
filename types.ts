@@ -1,5 +1,5 @@
 
-export type EffectType = 'DIRECT_DAMAGE' | 'HEAL_PLAYER' | 'DRAW_CARD' | 'NONE';
+export type EffectType = 'DIRECT_DAMAGE' | 'HEAL_PLAYER' | 'DRAW_CARD' | 'SHIELD' | 'LIFE_DRAIN' | 'BERSERK' | 'PIERCING' | 'REFLECT' | 'RECOIL' | 'NONE';
 export type BattleOutcome = 'win' | 'lose' | 'draw' | null;
 export type Attribute = 'passion' | 'calm' | 'harmony';
 

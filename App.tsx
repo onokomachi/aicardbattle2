@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from "firebase/analytics";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, setDoc, updateDoc, increment, arrayUnion, query, where, limit, getDocs, onSnapshot, runTransaction } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, setDoc, updateDoc, increment, arrayUnion, query, where, limit, getDocs, onSnapshot, runTransaction, writeBatch } from 'firebase/firestore';
 import TopScreen from './components/TopScreen';
 import DeckBuilder from './components/DeckBuilder';
 import Matchmaking from './components/Matchmaking';
@@ -11,7 +11,7 @@ import GameBoard from './components/GameBoard';
 import RankingBoard from './components/RankingBoard';
 import GameMaster from './components/GameMaster';
 import type { CardData, GameState, TurnPhase, BattleOutcome, AttributeCounts, Room, Attribute } from './types';
-import { INITIAL_HP, HAND_SIZE, DECK_SIZE, INITIAL_UNLOCKED_CARDS, CardCatalogById, CARD_DEFINITIONS, ADMIN_EMAILS, GAMEMASTER_PASSWORD } from './constants';
+import { INITIAL_HP, HAND_SIZE, DECK_SIZE, INITIAL_UNLOCKED_CARDS, CardCatalogById as StaticCardCatalogById, CARD_DEFINITIONS, ADMIN_EMAILS, GAMEMASTER_PASSWORD } from './constants';
 import LevelUpAnimation from './components/LevelUpAnimation';
 
 // Restore configuration: Use VITE_API_KEY from environment, hardcode others for public client config
@@ -90,6 +90,18 @@ const App: React.FC = () => {
   const [unlockedCardIds, setUnlockedCardIds] = useState<number[]>([]);
   const [savedDecks, setSavedDecks] = useState<Record<string, number[]>>({});
   
+  // Dynamic Card Data
+  const [allCards, setAllCards] = useState<CardData[]>(CARD_DEFINITIONS); // Default to local constants initially
+  const [isLoadingCards, setIsLoadingCards] = useState(true);
+
+  // Derived Catalog for fast lookups
+  const cardCatalog = useMemo(() => {
+    return allCards.reduce((acc, card) => {
+      acc[card.definitionId] = card;
+      return acc;
+    }, {} as Record<number, CardData>);
+  }, [allCards]);
+
   // Game State
   const [playerDeck, setPlayerDeck] = useState<CardData[]>([]);
   const [pcDeck, setPcDeck] = useState<CardData[]>([]);
@@ -126,12 +138,11 @@ const App: React.FC = () => {
   const unsubscribeRoomRef = useRef<(() => void) | null>(null);
   
   // --- Refs for solving Stale Closures in Listeners ---
-  // イベントリスナー内で最新のStateを参照するためにRefを使用する
   const isHostRef = useRef(isHost);
   const turnPhaseRef = useRef(turnPhase);
   const gameStateRef = useRef(gameState);
   const currentRoundRef = useRef(currentRound);
-  const pcPlayedCardRef = useRef(pcPlayedCard); // PvPでは相手のカードとして使用
+  const pcPlayedCardRef = useRef(pcPlayedCard); 
   const userRef = useRef(user);
   const processedMatchIdRef = useRef<string | null>(null);
 
@@ -147,6 +158,56 @@ const App: React.FC = () => {
   const addLog = useCallback((message: string) => {
     setGameLog(prev => [...prev, message]);
   }, []);
+
+  // --- Dynamic Card System: Migration & Fetching ---
+  useEffect(() => {
+    const initializeCards = async () => {
+      if (!db) {
+        setIsLoadingCards(false);
+        return;
+      }
+
+      try {
+        const cardsRef = collection(db, 'cards');
+        const snapshot = await getDocs(cardsRef);
+
+        if (snapshot.empty) {
+          console.log("Firestore 'cards' collection is empty. Migrating initial data...");
+          // Migration: Seed data from constants
+          const batch = writeBatch(db);
+          
+          CARD_DEFINITIONS.forEach((card) => {
+            // Use definitionId as Document ID for easier direct access if needed, 
+            // or let auto-id. Here we let auto-id but store definitionId field.
+            const newCardRef = doc(cardsRef); 
+            batch.set(newCardRef, card);
+          });
+
+          await batch.commit();
+          console.log("Migration complete. Cards seeded.");
+          setAllCards(CARD_DEFINITIONS);
+        } else {
+          // Fetch existing data
+          const fetchedCards: CardData[] = [];
+          snapshot.forEach((doc) => {
+            fetchedCards.push(doc.data() as CardData);
+          });
+          // Sort by definitionId to maintain order
+          fetchedCards.sort((a, b) => a.definitionId - b.definitionId);
+          setAllCards(fetchedCards);
+          console.log(`Loaded ${fetchedCards.length} cards from Firestore.`);
+        }
+      } catch (e) {
+        console.error("Error initializing cards from Firestore:", e);
+        // Fallback is already set in initial state
+      } finally {
+        setIsLoadingCards(false);
+      }
+    };
+
+    initializeCards();
+  }, []);
+
 
   useEffect(() => {
     // Initial Load from LocalStorage (for guests or offline)
@@ -231,10 +292,8 @@ const App: React.FC = () => {
     setGameState('login_screen');
   };
   
-  // Game Master Access Check
   const canAccessGameMaster = useMemo(() => {
     if (!user) return false;
-    // ADMIN_EMAILSが空の場合は、ログインユーザー全員に許可（開発・デモ用）
     if (ADMIN_EMAILS.length === 0) return true;
     return user.email && ADMIN_EMAILS.includes(user.email);
   }, [user]);
@@ -246,11 +305,13 @@ const App: React.FC = () => {
       localStorage.setItem('ai-card-battler-unlocked', JSON.stringify(newUnlocked));
       return newUnlocked;
     });
-    addLog(`【カードアンロック！】 「${CardCatalogById[newCardId].name}」がデッキ構築で使えるようになりました！`);
+    // Use dynamic catalog for name
+    const cardName = cardCatalog[newCardId]?.name || "未知のカード";
+    addLog(`【カードアンロック！】 「${cardName}」がデッキ構築で使えるようになりました！`);
     if (user && db) {
         updateDoc(doc(db, "users", user.uid), { unlockedCardIds: arrayUnion(newCardId) }).catch(console.error);
     }
-  }, [addLog, user]);
+  }, [addLog, user, cardCatalog]);
 
   const handleSaveDeck = useCallback(async (slotId: string, deck: CardData[]) => {
       const deckIds = deck.map(c => c.definitionId);
@@ -271,16 +332,10 @@ const App: React.FC = () => {
       }
   }, [savedDecks, user, addLog]);
 
-  // --- Task 2: Lobby Room Listener & Zombie Cleanup ---
   useEffect(() => {
-    // ロビー画面にいない、またはDBが初期化されていない場合は何もしない
     if ((gameState !== 'matchmaking' && gameState !== 'gamemaster') || !db) return;
-    
-    // GameMaster画面でもルーム情報は個別に取得しているので、ここではmatchmakingのみをターゲットにするのが理想だが、
-    // 既存のロジックがglobalなリスナーを使っているため、一旦matchmaking時のみに絞る
     if (gameState !== 'matchmaking') return;
 
-    // roomsコレクション全体を監視
     const roomsRef = collection(db, 'rooms');
     const q = query(roomsRef);
 
@@ -290,29 +345,22 @@ const App: React.FC = () => {
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as Room;
-        // データにIDが含まれていない場合の保険としてdoc.idを使用
         if (!data.roomId) {
             data.roomId = docSnap.id;
         }
         loadedRooms.push(data);
 
-        // --- ZOMBIE CLEANUP LOGIC (Active Garbage Collection) ---
-        // サーバー側で定期実行できないため、クライアントがデータ取得時に古い部屋を掃除する
         let isZombie = false;
         if (data.status === 'waiting' || data.status === 'playing') {
-            // Check 1: Heartbeat (High Accuracy)
-            // もし hostLastActive があり、かつ60秒以上更新がなければゾンビとみなす
             if (data.hostLastActive) {
                 const lastActive = data.hostLastActive.toMillis ? data.hostLastActive.toMillis() : 0;
-                if (now - lastActive > 60000) { // 60秒
+                if (now - lastActive > 60000) { 
                     isZombie = true;
                 }
             } 
-            // Check 2: Legacy / Fallback (Low Accuracy)
-            // ハートビートがない古いゾンビの場合、作成日時から5分経過で削除
             else if (data.createdAt) {
                 const created = data.createdAt.toMillis ? data.createdAt.toMillis() : 0;
-                if (now - created > 300000) { // 5分
+                if (now - created > 300000) { 
                     isZombie = true;
                 }
             }
@@ -320,7 +368,6 @@ const App: React.FC = () => {
 
         if (isZombie) {
             console.log(`🧹 Cleaning up zombie room detected: ${data.roomId}`);
-            // Firestoreへの書き込みを行う。他のユーザーと競合しても「最後に書き込んだ者」の結果は同じなので問題ない
             updateDoc(docSnap.ref, { 
                 status: 'finished',
                 guestId: null, 
@@ -338,27 +385,21 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [gameState]);
 
-  // --- Heartbeat Logic (Zombie Prevention during Game) ---
   useEffect(() => {
       if (gameMode !== 'pvp' || gameState !== 'in_game' || !currentRoomId || !db) return;
 
       const timer = setInterval(() => {
           if (!currentRoomId) return;
           const roomRef = doc(db, 'rooms', currentRoomId);
-          // Update my last active timestamp
           const field = isHostRef.current ? 'hostLastActive' : 'guestLastActive';
           updateDoc(roomRef, { [field]: serverTimestamp() }).catch(e => console.error("Heartbeat fail", e));
-      }, 5000); // 5 seconds heartbeat
+      }, 5000);
 
       return () => clearInterval(timer);
   }, [gameMode, gameState, currentRoomId]);
 
 
-  // --- Helper: Cleanup Game Session ---
-  // Fix for "Zombie Listener" / "Flashback" bug
-  // keepConnection: true if we are restarting a game (e.g. initial start) and want to keep Room ID/Host status
   const cleanupGameSession = useCallback((keepConnection = false) => {
-      // 1. Detach Listener & Reset Connection (Conditional)
       if (!keepConnection) {
           if (unsubscribeRoomRef.current) {
               unsubscribeRoomRef.current();
@@ -368,19 +409,12 @@ const App: React.FC = () => {
           setIsHost(false);
       }
       
-      // 2. Reset Game State Refs & State (Always)
       processedMatchIdRef.current = null;
       setWinner(null);
       setBattleOutcome(null);
       setPlayerPlayedCard(null);
       setPcPlayedCard(null);
       setTurnPhase('player_turn');
-      
-      // FIX: Do not clear decks here!
-      // playerDeck holds the initial deck setup needed for startGame.
-      // startGame will eventually overwrite these with the shuffled deck, so it's safe to keep them.
-      // setPlayerDeck([]); 
-      // setPcDeck([]);
   }, []);
 
   const getUpgradedCardInstance = useCallback((cardToDraw: CardData): CardData => {
@@ -391,10 +425,10 @@ const App: React.FC = () => {
   }, [levelUpMap]); // createNewCardInstance is ref-based
 
   const createNewCardInstance = useCallback((definitionId: number): CardData => {
-    const definition = CardCatalogById[definitionId];
+    const definition = cardCatalog[definitionId] || StaticCardCatalogById[definitionId]; // Fallback just in case
     const newId = nextCardInstanceId.current++;
     return { ...definition, id: newId };
-  }, []);
+  }, [cardCatalog]);
 
   const endGameByDeckOut = () => {
     addLog("山札が尽きました！HPが高い方の勝利です。");
@@ -452,17 +486,14 @@ const App: React.FC = () => {
       const isHostVal = isHostRef.current;
       const currentGameState = gameStateRef.current;
 
-      // --- Heartbeat Check (Disconnect Detection) ---
       if (currentGameState === 'in_game' && data.status === 'playing') {
           const now = Date.now();
           const opponentLastActive = isHostVal ? data.guestLastActive : data.hostLastActive;
           
           if (opponentLastActive) {
              const lastActiveMillis = opponentLastActive.toMillis ? opponentLastActive.toMillis() : 0;
-             // If opponent hasn't updated for > 15 seconds, assume disconnect
              if (now - lastActiveMillis > 15000 && lastActiveMillis > 0) {
                  console.log("Opponent Disconnected detected.");
-                 // Declare myself winner
                  if (processedMatchIdRef.current !== roomId) {
                     setWinner("対戦相手の接続が切れました。あなたの不戦勝です。");
                     setGameState('end');
@@ -476,13 +507,13 @@ const App: React.FC = () => {
       if (data.status === 'playing' && currentGameState === 'matchmaking') {
         setMatchStatus('マッチング成立！バトルを開始します！');
         setCurrentRound(1);
-        processedMatchIdRef.current = null; // 新しいゲームのためにリセット
+        processedMatchIdRef.current = null;
         setTimeout(() => {
-             const pcDeckDefs = CARD_DEFINITIONS.slice(0, 10).flatMap(def => [def, def]);
+             // CPU deck also uses dynamic cards
+             const pcDeckDefs = allCards.slice(0, 10).flatMap(def => [def, def]);
              startGame(playerDeck, pcDeckDefs); 
              setGameState('in_game');
              
-             // Initial Heartbeat
              if (db && roomId) {
                 const field = isHostVal ? 'hostLastActive' : 'guestLastActive';
                 updateDoc(doc(db, 'rooms', roomId), { [field]: serverTimestamp() });
@@ -491,7 +522,6 @@ const App: React.FC = () => {
       }
 
       if (currentGameState === 'in_game' && (data.status === 'playing' || data.status === 'finished')) {
-          // Sync HP
           if (isHostVal) {
               setPlayerHP(data.p1Hp);
               setPcHP(data.p2Hp);
@@ -500,47 +530,36 @@ const App: React.FC = () => {
               setPcHP(data.p1Hp);
           }
 
-          // Sync Moves with BLIND REVEAL
           const opponentMove = isHostVal ? data.p2Move : data.p1Move;
           const myMoveOnServer = isHostVal ? data.p1Move : data.p2Move;
 
-          // Note: Ref is used to avoid duplicate state updates or closure issues
-          // If opponent moved, but I haven't moved yet (or logic hasn't synced my move), hide the card.
           if (opponentMove) {
               if (myMoveOnServer) {
-                  // Both have moved: REVEAL
                   if (JSON.stringify(pcPlayedCardRef.current) !== JSON.stringify(opponentMove)) {
                       setPcPlayedCard(opponentMove);
                   }
               } else {
-                  // Only opponent has moved: BLIND (Show card back)
-                  // Use a dummy object but ensuring it's not null so UI shows a card
                   if (pcPlayedCardRef.current?.id !== -1) {
                       setPcPlayedCard(HIDDEN_CARD);
                   }
               }
           } else {
-              // Opponent hasn't moved yet
               if (pcPlayedCardRef.current !== null) {
                   setPcPlayedCard(null);
               }
           }
 
-          // Phase Transition Logic (The Fix)
           if (myMoveOnServer && opponentMove) {
              const currentTp = turnPhaseRef.current;
              if (currentTp !== 'resolution_phase' && currentTp !== 'battle_animation') {
-                 // Ensure we have the REAL card before resolving
                  setPcPlayedCard(opponentMove); 
                  setTurnPhase('resolution_phase');
              }
           }
 
-          // Round Reset
           const currentR = currentRoundRef.current;
           if (data.round > currentR) {
              setCurrentRound(data.round);
-             // Standard Turn Draw
              drawCards(1, 1);
              setPlayerPlayedCard(null); 
              setPcPlayedCard(null);
@@ -548,9 +567,7 @@ const App: React.FC = () => {
              addLog(`ターン ${data.round} 開始！`);
           }
 
-          // Game End & Recording
           if (data.winnerId) {
-             // 重複処理防止
              if (processedMatchIdRef.current !== roomId) {
                  processedMatchIdRef.current = roomId;
 
@@ -562,7 +579,6 @@ const App: React.FC = () => {
                  
                  setGameState('end');
 
-                 // Record stats to Firestore
                  if (userRef.current && db) {
                      const userDocRef = doc(db, 'users', userRef.current.uid);
                      const updates: any = {
@@ -574,7 +590,6 @@ const App: React.FC = () => {
                      updateDoc(userDocRef, updates).catch(err => console.error("Stats update failed", err));
                  }
                  
-                 // Mark room as finished to prevent zombies (Double check)
                  if (data.status !== 'finished') {
                      updateDoc(roomRef, { status: 'finished' });
                  }
@@ -585,7 +600,6 @@ const App: React.FC = () => {
   };
 
   const cancelMatchmaking = async () => {
-    // Leave room logic
     if (currentRoomId && db && user) {
         try {
             const roomRef = doc(db, 'rooms', currentRoomId);
@@ -601,17 +615,14 @@ const App: React.FC = () => {
         }
     }
     
-    // Strict Cleanup
-    cleanupGameSession(false); // Clear connection
+    cleanupGameSession(false); 
     setGameState('deck_building');
   };
 
-  // Browser close cleanup attempt
   useEffect(() => {
     const handleBeforeUnload = () => {
-       cleanupGameSession(false); // Clear connection
+       cleanupGameSession(false); 
        if (gameState === 'matchmaking' && isHost && currentRoomId && db) {
-           // Basic update attempt (best effort)
            const roomRef = doc(db, 'rooms', currentRoomId);
            updateDoc(roomRef, { status: 'finished' }).catch(() => {});
        }
@@ -625,24 +636,20 @@ const App: React.FC = () => {
       setGameMode(mode);
       
       if (mode === 'cpu') {
-          const pcDeckDefs = CARD_DEFINITIONS.slice(0, 10).flatMap(def => [def, def]);
+          // Use dynamic cards for CPU Deck
+          const pcDeckDefs = allCards.slice(0, 10).flatMap(def => [def, def]);
           startGame(deck, pcDeckDefs);
           setGameState('in_game');
       } else {
-          // Switch to Lobby Screen
           setGameState('matchmaking');
       }
   };
 
-  // Task 3 & 4: Transaction-based Join Room Logic with Zombie Cleanup
   const handleJoinRoom = async (roomId: string) => {
     if (!user || !db) return;
-    
-    // Prevent joining if already in a room
     if (currentRoomId) return;
 
-    // Ensure clean slate before joining
-    cleanupGameSession(false); // Clear connection
+    cleanupGameSession(false);
 
     try {
         const roomRef = doc(db, 'rooms', roomId);
@@ -650,7 +657,6 @@ const App: React.FC = () => {
         const result = await runTransaction(db, async (transaction) => {
             const roomDoc = await transaction.get(roomRef);
             
-            // Function to setup a new room (HOST)
             const setupNewRoom = () => {
                 transaction.set(roomRef, {
                     roomId,
@@ -660,7 +666,7 @@ const App: React.FC = () => {
                     guestId: null,
                     guestName: null,
                     createdAt: serverTimestamp(),
-                    hostLastActive: serverTimestamp(), // Initialize HB
+                    hostLastActive: serverTimestamp(), 
                     guestLastActive: null,
                     hostReady: true,
                     guestReady: false,
@@ -685,36 +691,30 @@ const App: React.FC = () => {
             }
 
             if (data.status === 'waiting') {
-                // Task 4: Zombie Check (3 minutes)
                 if (data.createdAt) {
-                    // Firestore Timestamp to Millis check
                     const createdTime = data.createdAt.toMillis ? data.createdAt.toMillis() : Date.now();
                     const now = Date.now();
-                    // 3 minutes = 180000 ms
                     if (now - createdTime > 180000) {
                         console.log("Zombie room detected! Overwriting...", roomId);
                         return setupNewRoom();
                     }
                 }
 
-                // Prevent self-match
                 if (data.hostId === user.uid) {
-                    return 'host'; // Resume hosting
+                    return 'host'; 
                 }
                 
-                // JOIN AS GUEST
                 transaction.update(roomRef, {
                     status: 'playing',
                     guestId: user.uid,
                     guestName: user.displayName || 'Unknown',
                     guestReady: true,
-                    guestLastActive: serverTimestamp() // Initialize HB
+                    guestLastActive: serverTimestamp() 
                 });
                 return 'guest';
             }
 
             if (data.status === 'playing') {
-                // Reconnect support
                 if (data.hostId === user.uid) return 'host';
                 if (data.guestId === user.uid) return 'guest';
                 throw new Error("Room is full");
@@ -739,13 +739,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Task 3: Listen to the room automatically once joined
   useEffect(() => {
-    // Only depend on currentRoomId to prevent unnecessary re-subscriptions when gameState changes
     if (currentRoomId) {
         listenToRoom(currentRoomId);
     }
-    // Unsubscribe is handled inside listenToRoom wrapper or component unmount
     return () => {
          if (unsubscribeRoomRef.current) {
             unsubscribeRoomRef.current();
@@ -755,7 +752,6 @@ const App: React.FC = () => {
   }, [currentRoomId]);
 
   const startGame = useCallback((playerDeckSetup: CardData[], pcDeckSetup: CardData[]) => {
-    // Use keepConnection=true to avoid clearing Room ID/Host status when game starts
     cleanupGameSession(true);
 
     nextCardInstanceId.current = 0;
@@ -784,12 +780,11 @@ const App: React.FC = () => {
     setPcIsCasting(false);
     setLevelUpMap({});
     setLevelUpAnimationData(null);
-    processedMatchIdRef.current = null; // Reset match processing state
+    processedMatchIdRef.current = null; 
   }, [createNewCardInstance, cleanupGameSession]);
 
   const resolveBattle = useCallback(() => {
     if (!playerPlayedCard || !pcPlayedCard) return;
-    // Hidden Card Safety Check: Do not resolve if card is hidden
     if (pcPlayedCard.id === -1) return;
 
     const matchup = getAttributeMatchup(playerPlayedCard.attribute, pcPlayedCard.attribute);
@@ -800,8 +795,28 @@ const App: React.FC = () => {
     let playerDraw = 0;
     let pcDraw = 0;
 
-    // --- EFFECT RESOLUTION ---
-    // Player Card Effects
+    let playerShield = 0;
+    let pcShield = 0;
+    
+    // Effective stats (for piercing)
+    let pDef = playerPlayedCard.defense;
+    let cDef = pcPlayedCard.defense;
+
+    // --- Effect Trigger Log ---
+    
+    // Handle PIERCING (Modify effective defense)
+    if (playerPlayedCard.effect === 'PIERCING') {
+        cDef = 0;
+        setPlayerIsCasting(true);
+        addLog(`【効果】あなたの「${playerPlayedCard.name}」は防御を貫通する！`);
+    }
+    if (pcPlayedCard.effect === 'PIERCING') {
+        pDef = 0;
+        setPcIsCasting(true);
+        addLog(`【効果】相手の「${pcPlayedCard.name}」は防御を貫通する！`);
+    }
+
+    // --- Player Card Effects ---
     if (playerPlayedCard.effect === 'DIRECT_DAMAGE') {
         const dmg = playerPlayedCard.effectValue || 0;
         damageToPc += dmg;
@@ -815,9 +830,32 @@ const App: React.FC = () => {
         playerDraw = playerPlayedCard.effectValue || 0;
         setPlayerIsCasting(true);
         addLog(`【効果】あなたの「${playerPlayedCard.name}」の効果でカードを${playerDraw}枚ドロー！`);
+    } else if (playerPlayedCard.effect === 'SHIELD') {
+        playerShield = playerPlayedCard.effectValue || 0;
+        setPlayerIsCasting(true);
+        addLog(`【効果】あなたの「${playerPlayedCard.name}」がシールドを展開！(-${playerShield}ダメージ)`);
+    } else if (playerPlayedCard.effect === 'LIFE_DRAIN') {
+        const val = playerPlayedCard.effectValue || 0;
+        damageToPc += val;
+        playerHeal += val;
+        setPlayerIsCasting(true);
+        addLog(`【効果】あなたの「${playerPlayedCard.name}」がドレイン発動！${val}ダメージを与え、${val}回復！`);
+    } else if (playerPlayedCard.effect === 'BERSERK') {
+        if (playerHP <= 10) {
+            const val = playerPlayedCard.effectValue || 0;
+            damageToPc += val;
+            setPlayerIsCasting(true);
+            addLog(`【効果】「${playerPlayedCard.name}」の背水の陣！HPが半分以下なので追加${val}ダメージ！`);
+        }
+    } else if (playerPlayedCard.effect === 'RECOIL') {
+        const val = playerPlayedCard.effectValue || 0;
+        damageToPc += val;
+        damageToPlayer += val; // Self damage
+        setPlayerIsCasting(true);
+        addLog(`【効果】「${playerPlayedCard.name}」の捨て身攻撃！ 敵に${val}追加ダメージ、自分も${val}ダメージ！`);
     }
 
-    // PC Card Effects
+    // --- PC Card Effects ---
     if (pcPlayedCard.effect === 'DIRECT_DAMAGE') {
         const dmg = pcPlayedCard.effectValue || 0;
         damageToPlayer += dmg;
@@ -831,9 +869,31 @@ const App: React.FC = () => {
         pcDraw = pcPlayedCard.effectValue || 0;
         setPcIsCasting(true);
         addLog(`【効果】相手の「${pcPlayedCard.name}」の効果でカードを${pcDraw}枚ドロー！`);
+    } else if (pcPlayedCard.effect === 'SHIELD') {
+        pcShield = pcPlayedCard.effectValue || 0;
+        setPcIsCasting(true);
+        addLog(`【効果】相手の「${pcPlayedCard.name}」がシールドを展開！(-${pcShield}ダメージ)`);
+    } else if (pcPlayedCard.effect === 'LIFE_DRAIN') {
+        const val = pcPlayedCard.effectValue || 0;
+        damageToPlayer += val;
+        pcHeal += val;
+        setPcIsCasting(true);
+        addLog(`【効果】相手の「${pcPlayedCard.name}」がドレイン発動！${val}ダメージを与え、${val}回復！`);
+    } else if (pcPlayedCard.effect === 'BERSERK') {
+        if (pcHP <= 10) {
+            const val = pcPlayedCard.effectValue || 0;
+            damageToPlayer += val;
+            setPcIsCasting(true);
+            addLog(`【効果】相手の「${pcPlayedCard.name}」の背水の陣！HPが半分以下なので追加${val}ダメージ！`);
+        }
+    } else if (pcPlayedCard.effect === 'RECOIL') {
+        const val = pcPlayedCard.effectValue || 0;
+        damageToPlayer += val;
+        damageToPc += val; // Self damage
+        setPcIsCasting(true);
+        addLog(`【効果】相手の「${pcPlayedCard.name}」の捨て身攻撃！ 敵に${val}追加ダメージ、自分も${val}ダメージ！`);
     }
 
-    // Turn off effect animations after short delay
     if (playerIsCasting || pcIsCasting) {
         setTimeout(() => {
             setPlayerIsCasting(false);
@@ -841,19 +901,48 @@ const App: React.FC = () => {
         }, 1500);
     }
 
-    // --- BATTLE RESOLUTION ---
+    // --- Battle Logic (Physical Damage) ---
+    // Uses pDef and cDef which might have been modified by PIERCING
     if (matchup === 'advantage') {
       addLog(`【属性有利】 相手の攻撃はあなたに通じない！`);
-      damageToPc += Math.max(0, playerPlayedCard.attack - pcPlayedCard.defense);
+      damageToPc += Math.max(0, playerPlayedCard.attack - cDef);
     } else if (matchup === 'disadvantage') {
       addLog(`【属性不利】 あなたの攻撃は相手に通じない！`);
-      damageToPlayer += Math.max(0, pcPlayedCard.attack - playerPlayedCard.defense);
+      damageToPlayer += Math.max(0, pcPlayedCard.attack - pDef);
     } else {
       addLog("属性は互角！純粋な力のぶつかり合いだ！");
-      damageToPc += Math.max(0, playerPlayedCard.attack - pcPlayedCard.defense);
-      damageToPlayer += Math.max(0, pcPlayedCard.attack - playerPlayedCard.defense);
+      damageToPc += Math.max(0, playerPlayedCard.attack - cDef);
+      damageToPlayer += Math.max(0, pcPlayedCard.attack - pDef);
     }
 
+    // --- Apply Shield Mitigation ---
+    if (playerShield > 0 && damageToPlayer > 0) {
+        const blocked = Math.min(damageToPlayer, playerShield);
+        damageToPlayer -= blocked;
+        addLog(`あなたのシールドが${blocked}ダメージを防いだ！`);
+    }
+    if (pcShield > 0 && damageToPc > 0) {
+        const blocked = Math.min(damageToPc, pcShield);
+        damageToPc -= blocked;
+        addLog(`相手のシールドが${blocked}ダメージを防いだ！`);
+    }
+
+    // --- Apply REFLECT (Counter) ---
+    // Reflect deals damage based on damage taken (or fixed value if prefer, usually reflect is dynamic or fixed. Here we use effectValue)
+    if (playerPlayedCard.effect === 'REFLECT' && damageToPlayer > 0) {
+        const refVal = playerPlayedCard.effectValue || 0;
+        damageToPc += refVal;
+        setPlayerIsCasting(true);
+        addLog(`【効果】「${playerPlayedCard.name}」がカウンター発動！ ${refVal}ダメージを返す！`);
+    }
+    if (pcPlayedCard.effect === 'REFLECT' && damageToPc > 0) {
+        const refVal = pcPlayedCard.effectValue || 0;
+        damageToPlayer += refVal;
+        setPcIsCasting(true);
+        addLog(`【効果】相手の「${pcPlayedCard.name}」がカウンター発動！ ${refVal}ダメージを返す！`);
+    }
+
+    // --- Outcome Calculation ---
     let pOutcome: BattleOutcome = 'draw', pcOutcome: BattleOutcome = 'draw';
     if (damageToPc > damageToPlayer) { pOutcome = 'win'; pcOutcome = 'lose'; } 
     else if (damageToPlayer > damageToPc) { pOutcome = 'lose'; pcOutcome = 'win'; } 
@@ -866,7 +955,6 @@ const App: React.FC = () => {
     const newPcHp = Math.min(INITIAL_HP, pcHP - damageToPc + pcHeal);
     const newPlayerHp = Math.min(INITIAL_HP, playerHP - damageToPlayer + playerHeal);
     
-    // Process Extra Draws from Effects
     if (playerDraw > 0 || pcDraw > 0) {
         drawCards(playerDraw, pcDraw);
     }
@@ -874,7 +962,6 @@ const App: React.FC = () => {
     const continueGameLogic = () => {
       setBattleOutcome(null);
 
-      // CPU Mode
       if (gameMode === 'cpu') {
          setPcHP(newPcHp); setPlayerHP(newPlayerHp);
          if (newPlayerHp <= 0 || newPcHp <= 0) {
@@ -883,7 +970,6 @@ const App: React.FC = () => {
              else setWinner("あなたの勝ちです！");
              setGameState('end');
          } else {
-            // Standard Turn Draw
             drawCards(1, 1);
             setPlayerPlayedCard(null); setPcPlayedCard(null);
             setTurnPhase('player_turn'); addLog("あなたのターンです。");
@@ -891,7 +977,6 @@ const App: React.FC = () => {
          return;
       }
 
-      // PvP Mode (Host Authority)
       if (gameMode === 'pvp' && currentRoomId && db) {
          if (isHost) {
              let wId = null;
@@ -918,7 +1003,6 @@ const App: React.FC = () => {
       }
     };
     
-    // Level Up Check
     let didLevelUp = false;
     if (pOutcome === 'win' && playerPlayedCard.unlocks) {
        const baseId = playerPlayedCard.baseDefinitionId;
@@ -926,7 +1010,8 @@ const App: React.FC = () => {
        if (playerPlayedCard.unlocks > currentHighestLevel) {
          didLevelUp = true;
          const newLevelId = playerPlayedCard.unlocks;
-         const unlockedCardDef = CardCatalogById[newLevelId];
+         // Use dynamic catalog for unlock info
+         const unlockedCardDef = cardCatalog[newLevelId] || StaticCardCatalogById[newLevelId];
          addLog(`【進化！】「${playerPlayedCard.name}」が「${unlockedCardDef.name}」に進化した！`);
          setLevelUpMap(prev => ({...prev, [baseId]: newLevelId }));
          saveUnlockedCard(newLevelId);
@@ -936,7 +1021,7 @@ const App: React.FC = () => {
     }
     if (!didLevelUp) setTimeout(continueGameLogic, 2000);
 
-  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, addLog, drawCards, levelUpMap, saveUnlockedCard, gameMode, isHost, currentRoomId, playerIsCasting, pcIsCasting]);
+  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, addLog, drawCards, levelUpMap, saveUnlockedCard, gameMode, isHost, currentRoomId, playerIsCasting, pcIsCasting, cardCatalog]);
 
 
   const resolveTurn = useCallback(async () => {
@@ -957,7 +1042,6 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
   }, [turnPhase, resolveBattle]);
   
-  // CPU turn logic
   useEffect(() => {
     if (gameMode !== 'cpu') return; 
     if (turnPhase !== 'pc_turn' || pcHand.length === 0 || !playerPlayedCard) return;
@@ -989,7 +1073,6 @@ const App: React.FC = () => {
               
               if (gameMode === 'pvp') {
                   if (!currentRoomId || !db) return;
-                  // CHANGE: Wait for opponent instead of going directly to resolution/pc_turn
                   setTurnPhase('waiting_for_opponent');
                   addLog("対戦相手のカード選択を待っています...");
                   const roomRef = doc(db, 'rooms', currentRoomId);
@@ -1003,7 +1086,12 @@ const App: React.FC = () => {
       }
   };
   
-  const unlockedCardsData = unlockedCardIds.map(id => CardCatalogById[id]);
+  // Use dynamic cards for mapping unlocked IDs to objects
+  const unlockedCardsData = useMemo(() => {
+    return unlockedCardIds
+        .map(id => cardCatalog[id] || null)
+        .filter((c): c is CardData => c !== null);
+  }, [unlockedCardIds, cardCatalog]);
 
   return (
     <div className="w-full h-screen bg-gray-900 text-white overflow-hidden font-sans select-none relative">
@@ -1051,13 +1139,20 @@ const App: React.FC = () => {
             )}
             
             {gameState === 'deck_building' && (
-                <DeckBuilder 
-                    unlockedCards={unlockedCardsData}
-                    onDeckSubmit={handleDeckSubmit}
-                    isGuest={!user}
-                    savedDecks={savedDecks}
-                    onSaveDeck={handleSaveDeck}
-                />
+                isLoadingCards ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-amber-500 animate-pulse">
+                     <p className="text-2xl font-bold">カードデータを読み込み中...</p>
+                  </div>
+                ) : (
+                  <DeckBuilder 
+                      unlockedCards={unlockedCardsData}
+                      onDeckSubmit={handleDeckSubmit}
+                      isGuest={!user}
+                      savedDecks={savedDecks}
+                      onSaveDeck={handleSaveDeck}
+                      cardCatalog={cardCatalog}
+                  />
+                )
             )}
 
             {gameState === 'matchmaking' && (

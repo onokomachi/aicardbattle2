@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import type { CardData } from '../types';
 import Card from './Card';
-import { DECK_SIZE, MAX_DUPLICATES, CardCatalogById } from '../constants';
+import { DECK_SIZE, MAX_DUPLICATES } from '../constants';
 
 interface DeckBuilderProps {
   unlockedCards: CardData[];
@@ -10,9 +10,10 @@ interface DeckBuilderProps {
   isGuest: boolean;
   savedDecks: Record<string, number[]>;
   onSaveDeck: (slotId: string, deck: CardData[]) => void;
+  cardCatalog: Record<number, CardData>; // Added Prop
 }
 
-const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, isGuest, savedDecks, onSaveDeck }) => {
+const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, isGuest, savedDecks, onSaveDeck, cardCatalog }) => {
   const [deck, setDeck] = useState<CardData[]>([]);
   const [activeSlot, setActiveSlot] = useState<string>('slot1');
   
@@ -71,7 +72,7 @@ const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, 
       let missingCards = false;
 
       savedIds.forEach(id => {
-          const cardDef = CardCatalogById[id];
+          const cardDef = cardCatalog[id]; // Use Prop instead of imported constant
           if (cardDef) {
               // unlocked check (optional but recommended)
               // We skip strictly checking "unlockedCards" prop because data sync might lag, 
@@ -97,6 +98,20 @@ const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, 
   };
   
   const isDeckValid = deck.length === DECK_SIZE;
+
+  // Helper to get tooltip text including evolution info
+  const getCardTooltip = (card: CardData) => {
+      let text = `${card.name}\nATK:${card.attack} DEF:${card.defense}\n${card.description}`;
+      if (card.unlocks !== undefined) {
+          const nextCard = cardCatalog[card.unlocks];
+          if (nextCard) {
+              text += `\n\n【進化可能】\n勝利時、一定確率で「${nextCard.name}」に進化！`;
+          } else {
+              text += `\n\n【進化可能】\n(データ未定義: ID ${card.unlocks})`;
+          }
+      }
+      return text;
+  };
 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center p-4 text-white">
@@ -148,7 +163,12 @@ const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, 
               const isDimmed = count <= 0;
               const isHighLevel = (cardDef.level || 1) > 1;
               return (
-                 <div key={cardDef.definitionId} className="relative transform hover:scale-105 transition-transform" onClick={() => !isDimmed && addCardToDeck(cardDef)}>
+                 <div 
+                    key={cardDef.definitionId} 
+                    className="relative transform hover:scale-105 transition-transform group" 
+                    onClick={() => !isDimmed && addCardToDeck(cardDef)}
+                    title={getCardTooltip(cardDef)}
+                 >
                    <div className={`${isDimmed ? 'opacity-30' : 'cursor-pointer'}`}>
                       <Card card={cardDef} />
                    </div>
@@ -168,7 +188,12 @@ const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, 
           <h2 className="text-xl font-bold text-amber-400 mb-2 text-center">あなたのデッキ ({deck.length}/{DECK_SIZE})</h2>
           <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-2 custom-scrollbar">
              {deck.map((card, index) => (
-                <div key={index} className="relative transform hover:scale-105 transition-transform" onClick={() => removeCardFromDeck(card, index)}>
+                <div 
+                    key={index} 
+                    className="relative transform hover:scale-105 transition-transform" 
+                    onClick={() => removeCardFromDeck(card, index)}
+                    title={getCardTooltip(card)}
+                >
                     <div className="cursor-pointer">
                         <Card card={card} />
                     </div>

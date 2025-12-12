@@ -372,7 +372,8 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
                                 <tr key={card.definitionId} className="hover:bg-gray-700/50">
                                     <td className="p-3 font-mono text-gray-300 font-bold text-center">{card.definitionId}</td>
                                     <td className="p-3">
-                                        <img src={`Image2/${card.image}`} alt="" className="w-12 h-16 object-cover rounded border border-gray-600 bg-black" />
+                                        {/* Added leading slash to src to fix preview path */}
+                                        <img src={`/Image2/${card.image}`} alt="" className="w-12 h-16 object-cover rounded border border-gray-600 bg-black" />
                                         <div className="text-[10px] text-gray-500 truncate w-12">{card.image}</div>
                                     </td>
                                     <td className="p-3">
@@ -471,7 +472,8 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, onClose }) => {
                          <div className="flex items-center justify-center bg-black/50 border border-gray-700 rounded mt-5 relative group">
                              {editFormData.image ? (
                                 <>
-                                 <img src={`Image2/${editFormData.image}`} alt="Preview" className="h-10 object-contain" onError={(e) => (e.currentTarget.style.display='none')} />
+                                 {/* Added leading slash to src to fix preview path */}
+                                 <img src={`/Image2/${editFormData.image}`} alt="Preview" className="h-10 object-contain" onError={(e) => (e.currentTarget.style.display='none')} />
                                  <div className="absolute inset-0 hidden group-hover:flex items-center justify-center bg-black/80 text-xs text-white p-1 rounded">
                                     Preview
                                  </div>

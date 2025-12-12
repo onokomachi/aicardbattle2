@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import type { BattleOutcome, CardData } from '../types';
 import { AttackIcon, DefenseIcon } from './Icons';
@@ -26,7 +27,8 @@ const Card: React.FC<CardProps> = ({
   owner = 'player'
 }) => {
   const [imageError, setImageError] = useState(false);
-  const imageUrl = `Image2/${card.image}`;
+  // Using absolute path for public assets
+  const imageUrl = `/Image2/${card.image}`;
 
   const handleImageError = () => {
     setImageError(true);
@@ -97,7 +99,8 @@ const Card: React.FC<CardProps> = ({
 
 export const CardBack: React.FC = () => {
   const [imageError, setImageError] = useState(false);
-  const imageUrl = `Image2/11.jpg`;
+  // Using absolute path for public assets
+  const imageUrl = `/Image2/11.jpg`;
 
   const handleError = () => {
     setImageError(true);

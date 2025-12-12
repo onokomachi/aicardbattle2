@@ -221,21 +221,45 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
     }
   };
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = error => reject(error);
+    });
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!storage || !e.target.files || e.target.files.length === 0) return;
     
     const file = e.target.files[0];
-    // Create a unique filename
-    const storageRef = ref(storage, `card-images/${Date.now()}_${file.name}`);
     
     setIsUploading(true);
     try {
+        // 1. Try Firebase Storage First
+        const storageRef = ref(storage, `card-images/${Date.now()}_${file.name}`);
         const snapshot = await uploadBytes(storageRef, file);
         const url = await getDownloadURL(snapshot.ref);
         setEditFormData(prev => ({ ...prev, image: url }));
-    } catch (error) {
-        console.error("Upload failed", error);
-        alert("画像のアップロードに失敗しました");
+    } catch (error: any) {
+        console.warn("Storage upload failed, attempting fallback to Base64...", error);
+        
+        // 2. Fallback to Base64 (Firestore Storage)
+        if (file.size > 800 * 1024) { // Warn if > 800KB
+            alert(`画像のアップロードに失敗しました(Storage権限エラーなど)。\n代替策としてデータを直接保存しようとしましたが、画像サイズが大きすぎます(${Math.round(file.size/1024)}KB)。\n800KB以下に圧縮してください。`);
+            setIsUploading(false);
+            return;
+        }
+
+        try {
+            const base64String = await fileToBase64(file);
+            setEditFormData(prev => ({ ...prev, image: base64String }));
+            alert("Storageへのアクセス権限がなかったため、画像をカードデータ内に直接保存しました。\n(注意: データサイズが大きくなるため、多用は避けてください)");
+        } catch (b64Error) {
+            console.error("Base64 conversion failed", b64Error);
+            alert("画像の読み込みに失敗しました。");
+        }
     } finally {
         setIsUploading(false);
     }
@@ -392,15 +416,15 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
                         </thead>
                         <tbody className="divide-y divide-gray-700">
                             {filteredCards.map((card) => {
-                                const isExternal = card.image.startsWith('http');
-                                const imgDisplaySrc = isExternal ? card.image : `/Image2/${card.image}`;
+                                const isExternalOrData = card.image.startsWith('http') || card.image.startsWith('data:');
+                                const imgDisplaySrc = isExternalOrData ? card.image : `/Image2/${card.image}`;
                                 
                                 return (
                                 <tr key={card.definitionId} className="hover:bg-gray-700/50">
                                     <td className="p-3 font-mono text-gray-300 font-bold text-center">{card.definitionId}</td>
                                     <td className="p-3">
                                         <img src={imgDisplaySrc} alt="" className="w-12 h-16 object-cover rounded border border-gray-600 bg-black" />
-                                        <div className="text-[10px] text-gray-500 truncate w-12">{card.image}</div>
+                                        <div className="text-[10px] text-gray-500 truncate w-12">{card.image.substring(0, 15)}{card.image.length>15 && '...'}</div>
                                     </td>
                                     <td className="p-3">
                                         <div className="font-bold text-white">{card.name}</div>
@@ -488,7 +512,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
                                     value={editFormData.image} 
                                     onChange={e => setEditFormData({...editFormData, image: e.target.value})} 
                                     className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white text-xs" 
-                                    placeholder="filename or URL" 
+                                    placeholder="filename, URL, or Data URI" 
                                 />
                                 <div className="flex items-center gap-2">
                                     <label className={`text-xs px-3 py-2 rounded cursor-pointer transition-colors w-full text-center border ${isUploading ? 'bg-gray-700 text-gray-500 border-gray-700 cursor-not-allowed' : 'bg-blue-900/50 hover:bg-blue-800 border-blue-600 text-blue-200'}`}>
@@ -513,7 +537,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
                              {editFormData.image ? (
                                 <>
                                  <img 
-                                   src={editFormData.image.startsWith('http') ? editFormData.image : `/Image2/${editFormData.image}`} 
+                                   src={editFormData.image.startsWith('http') || editFormData.image.startsWith('data:') ? editFormData.image : `/Image2/${editFormData.image}`} 
                                    alt="Preview" 
                                    className="h-24 object-contain" 
                                    onError={(e) => (e.currentTarget.style.display='none')} 

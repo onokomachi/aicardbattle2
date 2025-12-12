@@ -28,9 +28,9 @@ const Card: React.FC<CardProps> = ({
 }) => {
   const [imageError, setImageError] = useState(false);
   
-  // Logic to handle both local images (legacy) and remote URLs (uploaded)
-  const isExternalUrl = card.image.startsWith('http://') || card.image.startsWith('https://');
-  const imageUrl = isExternalUrl ? card.image : `/Image2/${card.image}`;
+  // Logic to handle local images, remote URLs (Storage), and Base64 Data URIs
+  const isExternalOrData = card.image.startsWith('http') || card.image.startsWith('data:');
+  const imageUrl = isExternalOrData ? card.image : `/Image2/${card.image}`;
 
   const handleImageError = () => {
     setImageError(true);

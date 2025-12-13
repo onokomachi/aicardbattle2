@@ -37,6 +37,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
   const [showCardModal, setShowCardModal] = useState(false);
   const [editFormData, setEditFormData] = useState<Partial<CardData>>({});
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string>(''); // For UI feedback
 
   // フィルター用State
   const [cardSearchTerm, setCardSearchTerm] = useState('');
@@ -145,6 +146,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
     setEditFormData({ ...card });
     setIsNewCard(false);
     setShowCardModal(true);
+    setUploadStatus('');
   };
 
   const handleDeleteCard = async (card: FirestoreCardData) => {
@@ -178,6 +180,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
     });
     setIsNewCard(true);
     setShowCardModal(true);
+    setUploadStatus('');
   };
 
   const saveCard = async () => {
@@ -221,43 +224,65 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
     }
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = error => reject(error);
-    });
+  // Resize and compress image to Base64 (max 500px width)
+  const compressImage = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = (event) => {
+              const img = new Image();
+              img.src = event.target?.result as string;
+              img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  const MAX_WIDTH = 500;
+                  const scaleSize = MAX_WIDTH / img.width;
+                  const width = (img.width > MAX_WIDTH) ? MAX_WIDTH : img.width;
+                  const height = (img.width > MAX_WIDTH) ? img.height * scaleSize : img.height;
+
+                  canvas.width = width;
+                  canvas.height = height;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                      ctx.drawImage(img, 0, 0, width, height);
+                      // Compress to JPEG 0.7 quality
+                      resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+                  } else {
+                      reject(new Error("Canvas context failed"));
+                  }
+              };
+              img.onerror = (err) => reject(err);
+          };
+          reader.onerror = (err) => reject(err);
+      });
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!storage || !e.target.files || e.target.files.length === 0) return;
     
     const file = e.target.files[0];
-    
+    setUploadStatus('Uploading...');
     setIsUploading(true);
+
     try {
         // 1. Try Firebase Storage First
         const storageRef = ref(storage, `card-images/${Date.now()}_${file.name}`);
         const snapshot = await uploadBytes(storageRef, file);
         const url = await getDownloadURL(snapshot.ref);
         setEditFormData(prev => ({ ...prev, image: url }));
+        setUploadStatus('Success (Storage)');
     } catch (error: any) {
-        console.warn("Storage upload failed, attempting fallback to Base64...", error);
+        console.warn("Storage upload failed (likely permission), attempting fallback...", error);
         
-        // 2. Fallback to Base64 (Firestore Storage)
-        if (file.size > 800 * 1024) { // Warn if > 800KB
-            alert(`画像のアップロードに失敗しました(Storage権限エラーなど)。\n代替策としてデータを直接保存しようとしましたが、画像サイズが大きすぎます(${Math.round(file.size/1024)}KB)。\n800KB以下に圧縮してください。`);
-            setIsUploading(false);
-            return;
-        }
-
+        // 2. Fallback to Compressed Base64
         try {
-            const base64String = await fileToBase64(file);
+            const base64String = await compressImage(file);
             setEditFormData(prev => ({ ...prev, image: base64String }));
-            alert("Storageへのアクセス権限がなかったため、画像をカードデータ内に直接保存しました。\n(注意: データサイズが大きくなるため、多用は避けてください)");
+            setUploadStatus('Success (Local Save)');
+            // Gentle notification instead of alert
+            console.log("Storage permission denied. Saved image directly to card data (compressed).");
         } catch (b64Error) {
-            console.error("Base64 conversion failed", b64Error);
+            console.error("Image compression failed", b64Error);
+            setUploadStatus('Failed');
             alert("画像の読み込みに失敗しました。");
         }
     } finally {
@@ -423,7 +448,16 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
                                 <tr key={card.definitionId} className="hover:bg-gray-700/50">
                                     <td className="p-3 font-mono text-gray-300 font-bold text-center">{card.definitionId}</td>
                                     <td className="p-3">
-                                        <img src={imgDisplaySrc} alt="" className="w-12 h-16 object-cover rounded border border-gray-600 bg-black" />
+                                        <img 
+                                          src={imgDisplaySrc} 
+                                          alt="" 
+                                          className="w-12 h-16 object-cover rounded border border-gray-600 bg-black" 
+                                          onError={(e) => {
+                                              // Fallback for broken list images
+                                              e.currentTarget.style.display = 'none';
+                                              e.currentTarget.parentElement?.insertAdjacentHTML('beforeend', '<div class="w-12 h-16 flex items-center justify-center bg-gray-800 text-xs text-gray-500">No Img</div>');
+                                          }}
+                                        />
                                         <div className="text-[10px] text-gray-500 truncate w-12">{card.image.substring(0, 15)}{card.image.length>15 && '...'}</div>
                                     </td>
                                     <td className="p-3">
@@ -526,6 +560,12 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
                                         />
                                     </label>
                                 </div>
+                                {/* Status Indicator */}
+                                {uploadStatus && (
+                                    <div className={`text-[10px] text-right ${uploadStatus.includes('Failed') ? 'text-red-400' : 'text-green-400'}`}>
+                                        {uploadStatus}
+                                    </div>
+                                )}
                                 <datalist id="image-options">
                                     {existingImages.map(img => (
                                         <option key={img} value={img} />

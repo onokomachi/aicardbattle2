@@ -11,6 +11,7 @@ import Matchmaking from './components/Matchmaking';
 import GameBoard from './components/GameBoard';
 import RankingBoard from './components/RankingBoard';
 import GameMaster from './components/GameMaster';
+import Shop from './components/Shop'; // Import Shop
 import type { CardData, GameState, TurnPhase, BattleOutcome, AttributeCounts, Room, Attribute } from './types';
 import { INITIAL_HP, HAND_SIZE, DECK_SIZE, INITIAL_UNLOCKED_CARDS, CardCatalogById as StaticCardCatalogById, CARD_DEFINITIONS, ADMIN_EMAILS, GAMEMASTER_PASSWORD } from './constants';
 import LevelUpAnimation from './components/LevelUpAnimation';
@@ -88,6 +89,7 @@ const HIDDEN_CARD: CardData = {
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [coins, setCoins] = useState(0); // Coin State
   const [gameState, setGameState] = useState<GameState>('login_screen');
   const [gameMode, setGameMode] = useState<'cpu' | 'pvp'>('cpu');
   const [unlockedCardIds, setUnlockedCardIds] = useState<number[]>([]);
@@ -131,6 +133,7 @@ const App: React.FC = () => {
 
   // UI State
   const [showRanking, setShowRanking] = useState(false);
+  const [showShop, setShowShop] = useState(false); // Shop UI State
   const [matchStatus, setMatchStatus] = useState('');
   
   // PvP State
@@ -217,6 +220,11 @@ const App: React.FC = () => {
     const savedUnlock = localStorage.getItem('ai-card-battler-unlocked');
     if (savedUnlock) setUnlockedCardIds(JSON.parse(savedUnlock));
     else setUnlockedCardIds(INITIAL_UNLOCKED_CARDS);
+    
+    // Guest Coin Load
+    const savedCoins = localStorage.getItem('ai-card-battler-coins');
+    if (savedCoins) setCoins(parseInt(savedCoins));
+    else setCoins(1000); // Default for guest
 
     const savedDecksLocal = localStorage.getItem('ai-card-battler-saved-decks');
     if (savedDecksLocal) setSavedDecks(JSON.parse(savedDecksLocal));
@@ -233,6 +241,15 @@ const App: React.FC = () => {
               const userSnap = await getDoc(userRef);
               if (userSnap.exists()) {
                 const data = userSnap.data();
+                // Load Coins
+                if (data.coins !== undefined) {
+                    setCoins(data.coins);
+                } else {
+                    // Start bonus for existing users without coins field
+                    setCoins(1000);
+                    updateDoc(userRef, { coins: 1000 });
+                }
+
                 // Load Unlocked Cards
                 if (data.unlockedCardIds && Array.isArray(data.unlockedCardIds)) {
                    setUnlockedCardIds(data.unlockedCardIds);
@@ -249,6 +266,7 @@ const App: React.FC = () => {
                 }
               } else {
                 const initialUnlocks = INITIAL_UNLOCKED_CARDS;
+                const initialCoins = 1000;
                 await setDoc(userRef, {
                   displayName: u.displayName || 'Anonymous',
                   photoURL: u.photoURL || '',
@@ -256,10 +274,12 @@ const App: React.FC = () => {
                   totalWins: 0,
                   totalMatches: 0,
                   unlockedCardIds: initialUnlocks,
+                  coins: initialCoins,
                   savedDecks: {},
                   createdAt: serverTimestamp()
                 });
                 setUnlockedCardIds(initialUnlocks);
+                setCoins(initialCoins);
               }
             } catch (e) {
               console.error("Error syncing user profile:", e);
@@ -271,6 +291,10 @@ const App: React.FC = () => {
         const saved = localStorage.getItem('ai-card-battler-unlocked');
         if (saved) setUnlockedCardIds(JSON.parse(saved));
         else setUnlockedCardIds(INITIAL_UNLOCKED_CARDS);
+        
+        const savedC = localStorage.getItem('ai-card-battler-coins');
+        if (savedC) setCoins(parseInt(savedC));
+        else setCoins(1000);
 
         const savedD = localStorage.getItem('ai-card-battler-saved-decks');
         if (savedD) setSavedDecks(JSON.parse(savedD));
@@ -301,20 +325,37 @@ const App: React.FC = () => {
     return user.email && ADMIN_EMAILS.includes(user.email);
   }, [user]);
 
-  const saveUnlockedCard = useCallback(async (newCardId: number) => {
+  // Updated to handle multiple unlocks (for shop)
+  const unlockCards = useCallback(async (newCardIds: number[]) => {
     setUnlockedCardIds(prev => {
-      if (prev.includes(newCardId)) return prev;
-      const newUnlocked = [...prev, newCardId].sort((a,b) => a - b);
+      const uniqueNew = newCardIds.filter(id => !prev.includes(id));
+      if (uniqueNew.length === 0) return prev;
+      const newUnlocked = [...prev, ...uniqueNew].sort((a,b) => a - b);
       localStorage.setItem('ai-card-battler-unlocked', JSON.stringify(newUnlocked));
       return newUnlocked;
     });
-    // Use dynamic catalog for name
-    const cardName = cardCatalog[newCardId]?.name || "未知のカード";
-    addLog(`【カードアンロック！】 「${cardName}」がデッキ構築で使えるようになりました！`);
-    if (user && db) {
-        updateDoc(doc(db, "users", user.uid), { unlockedCardIds: arrayUnion(newCardId) }).catch(console.error);
+
+    if (user && db && newCardIds.length > 0) {
+        updateDoc(doc(db, "users", user.uid), { unlockedCardIds: arrayUnion(...newCardIds) }).catch(console.error);
     }
-  }, [addLog, user, cardCatalog]);
+  }, [user]);
+
+  const updateCoins = useCallback(async (amount: number) => {
+      setCoins(prev => {
+          const newVal = Math.max(0, prev + amount);
+          localStorage.setItem('ai-card-battler-coins', newVal.toString());
+          return newVal;
+      });
+      if (user && db) {
+          updateDoc(doc(db, "users", user.uid), { coins: increment(amount) }).catch(console.error);
+      }
+  }, [user]);
+
+  const handleBuyPack = async (cost: number, pulledCards: CardData[]) => {
+      await updateCoins(-cost);
+      const newIds = pulledCards.map(c => c.definitionId);
+      await unlockCards(newIds);
+  };
 
   const handleSaveDeck = useCallback(async (slotId: string, deck: CardData[]) => {
       const deckIds = deck.map(c => c.definitionId);
@@ -435,19 +476,30 @@ const App: React.FC = () => {
 
   const endGameByDeckOut = () => {
     addLog("山札が尽きました！HPが高い方の勝利です。");
+    let pWin = false;
+    let cpuWin = false;
+
+    if (playerHP > pcHP) pWin = true;
+    else if (pcHP > playerHP) cpuWin = true;
+
     if (gameMode === 'pvp') {
        if (isHost && currentRoomId && db) {
            let wId = 'draw';
-           if (playerHP > pcHP) wId = 'host';
-           else if (pcHP > playerHP) wId = 'guest';
+           if (pWin) wId = 'host';
+           else if (cpuWin) wId = 'guest';
            updateDoc(doc(db, 'rooms', currentRoomId), { winnerId: wId });
        }
        return; 
     }
     // CPU Mode
-    if (playerHP > pcHP) setWinner(`あなたの勝ちです！ (${playerHP} vs ${pcHP})`);
-    else if (pcHP > playerHP) setWinner(`あなたの負けです… (${playerHP} vs ${pcHP})`);
+    if (pWin) {
+        setWinner(`あなたの勝ちです！ (${playerHP} vs ${pcHP})`);
+        updateCoins(100);
+        addLog("勝利ボーナス！ 100コイン獲得！");
+    }
+    else if (cpuWin) setWinner(`あなたの負けです… (${playerHP} vs ${pcHP})`);
     else setWinner(`引き分けです！ (${playerHP} vs ${pcHP})`);
+    
     setGameState('end');
   };
 
@@ -500,6 +552,7 @@ const App: React.FC = () => {
                  if (processedMatchIdRef.current !== roomId) {
                     setWinner("対戦相手の接続が切れました。あなたの不戦勝です。");
                     setGameState('end');
+                    updateCoins(100); // Disconnect win
                     updateDoc(roomRef, { winnerId: isHostVal ? 'host' : 'guest', status: 'finished' });
                  }
                  return;
@@ -581,6 +634,11 @@ const App: React.FC = () => {
                  else setWinner("あなたの負けです…");
                  
                  setGameState('end');
+
+                 if (isWinner) {
+                     updateCoins(100);
+                     addLog("勝利ボーナス！ 100コイン獲得！");
+                 }
 
                  if (userRef.current && db) {
                      const userDocRef = doc(db, 'users', userRef.current.uid);
@@ -968,9 +1026,17 @@ const App: React.FC = () => {
       if (gameMode === 'cpu') {
          setPcHP(newPcHp); setPlayerHP(newPlayerHp);
          if (newPlayerHp <= 0 || newPcHp <= 0) {
-             if (newPlayerHp <= 0 && newPcHp <= 0) setWinner("引き分けです！");
-             else if (newPlayerHp <= 0) setWinner("あなたの負けです…");
-             else setWinner("あなたの勝ちです！");
+             if (newPlayerHp <= 0 && newPcHp <= 0) {
+                 setWinner("引き分けです！");
+             }
+             else if (newPlayerHp <= 0) {
+                 setWinner("あなたの負けです…");
+             }
+             else {
+                 setWinner("あなたの勝ちです！");
+                 updateCoins(100);
+                 addLog("勝利ボーナス！ 100コイン獲得！");
+             }
              setGameState('end');
          } else {
             drawCards(1, 1);
@@ -1017,14 +1083,14 @@ const App: React.FC = () => {
          const unlockedCardDef = cardCatalog[newLevelId] || StaticCardCatalogById[newLevelId];
          addLog(`【進化！】「${playerPlayedCard.name}」が「${unlockedCardDef.name}」に進化した！`);
          setLevelUpMap(prev => ({...prev, [baseId]: newLevelId }));
-         saveUnlockedCard(newLevelId);
+         // DELETED: saveUnlockedCard(newLevelId); <- Remove permanent unlock on battle evolution
          postAnimationCallback.current = continueGameLogic;
          setLevelUpAnimationData({ from: playerPlayedCard, to: unlockedCardDef });
        }
     }
     if (!didLevelUp) setTimeout(continueGameLogic, 2000);
 
-  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, addLog, drawCards, levelUpMap, saveUnlockedCard, gameMode, isHost, currentRoomId, playerIsCasting, pcIsCasting, cardCatalog]);
+  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, addLog, drawCards, levelUpMap, updateCoins, gameMode, isHost, currentRoomId, playerIsCasting, pcIsCasting, cardCatalog]);
 
 
   const resolveTurn = useCallback(async () => {
@@ -1107,14 +1173,23 @@ const App: React.FC = () => {
               {user ? (
                  <div className="flex items-center gap-2 bg-black/60 p-2 rounded-lg border border-gray-600">
                     {user.photoURL && <img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full" />}
-                    <span className="text-white text-sm">{user.displayName}</span>
-                    <button onClick={handleLogout} className="bg-red-600 hover:bg-red-500 text-white text-xs px-2 py-1 rounded">ログアウト</button>
+                    <div className="flex flex-col">
+                        <span className="text-white text-xs sm:text-sm">{user.displayName}</span>
+                        <span className="text-amber-400 text-xs font-bold">🪙 {coins} G</span>
+                    </div>
+                    <button onClick={handleLogout} className="bg-red-600 hover:bg-red-500 text-white text-xs px-2 py-1 rounded ml-2">ログアウト</button>
                  </div>
               ) : (
-                 <div className="bg-black/60 p-2 rounded-lg border border-gray-600 text-gray-300 text-sm">ゲストプレイ中</div>
+                 <div className="flex items-center gap-2 bg-black/60 p-2 rounded-lg border border-gray-600 text-gray-300 text-sm">
+                    <span>ゲストプレイ中</span>
+                    <span className="text-amber-400 font-bold ml-2">🪙 {coins} G</span>
+                 </div>
               )}
             </div>
-            <div className="pointer-events-auto">
+            <div className="pointer-events-auto flex gap-2">
+               <button onClick={() => setShowShop(true)} className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold px-4 py-2 rounded-lg shadow flex items-center gap-2">
+                  <span>🎴</span> ショップ
+               </button>
                <button onClick={() => setShowRanking(true)} className="bg-amber-500 hover:bg-amber-400 text-gray-900 font-bold px-4 py-2 rounded-lg shadow flex items-center gap-2">
                   <span>🏆</span> ランキング
                </button>
@@ -1130,6 +1205,7 @@ const App: React.FC = () => {
                     onGuestPlay={() => setGameState('deck_building')}
                     onStartGame={() => setGameState('deck_building')}
                     onLogout={handleLogout}
+                    onOpenShop={() => setShowShop(true)} // Pass Shop Handler
                     onOpenGameMaster={canAccessGameMaster ? () => {
                         const pwd = window.prompt('管理者パスワードを入力してください');
                         if (pwd === GAMEMASTER_PASSWORD) {
@@ -1154,6 +1230,7 @@ const App: React.FC = () => {
                       savedDecks={savedDecks}
                       onSaveDeck={handleSaveDeck}
                       cardCatalog={cardCatalog}
+                      coins={coins} // Pass coins
                   />
                 )
             )}
@@ -1216,6 +1293,15 @@ const App: React.FC = () => {
             
             {showRanking && db && (
                 <RankingBoard onClose={() => setShowRanking(false)} db={db} />
+            )}
+
+            {showShop && (
+                <Shop 
+                    coins={coins} 
+                    allCards={allCards} 
+                    onBuyPack={handleBuyPack} 
+                    onClose={() => setShowShop(false)} 
+                />
             )}
 
             {gameState === 'gamemaster' && db && (

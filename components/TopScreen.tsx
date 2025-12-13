@@ -8,10 +8,11 @@ interface TopScreenProps {
   onGuestPlay: () => void;
   onStartGame: () => void;
   onLogout: () => void;
-  onOpenGameMaster?: () => void; // Added prop
+  onOpenShop: () => void; // Added
+  onOpenGameMaster?: () => void;
 }
 
-const TopScreen: React.FC<TopScreenProps> = ({ currentUser, onLogin, onGuestPlay, onStartGame, onLogout, onOpenGameMaster }) => {
+const TopScreen: React.FC<TopScreenProps> = ({ currentUser, onLogin, onGuestPlay, onStartGame, onLogout, onOpenShop, onOpenGameMaster }) => {
   return (
     <div className="w-full h-full flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Background Effects */}
@@ -51,6 +52,13 @@ const TopScreen: React.FC<TopScreenProps> = ({ currentUser, onLogin, onGuestPlay
                 冒険を続ける
               </button>
               
+              <button
+                onClick={onOpenShop}
+                className="w-full bg-gray-800 hover:bg-gray-700 text-amber-400 font-bold py-3 px-6 rounded-xl border border-gray-600 shadow-lg flex items-center justify-center gap-2"
+              >
+                <span>🎴</span> カードショップ
+              </button>
+
               <div className="flex justify-center gap-4 mt-4">
                  <button
                     onClick={onLogout}

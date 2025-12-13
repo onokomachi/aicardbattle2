@@ -10,10 +10,11 @@ interface DeckBuilderProps {
   isGuest: boolean;
   savedDecks: Record<string, number[]>;
   onSaveDeck: (slotId: string, deck: CardData[]) => void;
-  cardCatalog: Record<number, CardData>; // Added Prop
+  cardCatalog: Record<number, CardData>;
+  coins: number; // Added
 }
 
-const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, isGuest, savedDecks, onSaveDeck, cardCatalog }) => {
+const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, isGuest, savedDecks, onSaveDeck, cardCatalog, coins }) => {
   const [deck, setDeck] = useState<CardData[]>([]);
   const [activeSlot, setActiveSlot] = useState<string>('slot1');
   
@@ -117,7 +118,10 @@ const DeckBuilder: React.FC<DeckBuilderProps> = ({ unlockedCards, onDeckSubmit, 
     <div className="w-full h-full flex flex-col items-center justify-center p-4 text-white">
       <div className="flex flex-col items-center mb-2">
          <h1 className="text-4xl font-bold text-amber-300 drop-shadow-lg">デッキ構築</h1>
-         <p className="text-sm text-gray-400">Lv.2以上の強力なカードは1枚制限です</p>
+         <div className="text-sm text-gray-400 mt-1 flex gap-4">
+             <span>Lv.2以上の強力なカードは1枚制限</span>
+             <span className="text-amber-400 font-bold">所持コイン: {coins} G</span>
+         </div>
       </div>
       
       {/* Save/Load Controls */}

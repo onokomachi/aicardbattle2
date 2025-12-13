@@ -224,8 +224,8 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
     }
   };
 
-  // Resize and compress image to Base64 (max 500px width)
-  const compressImage = (file: File): Promise<string> => {
+  // Resize and compress image to Blob (max 500px width, JPEG 0.7)
+  const compressImageToBlob = (file: File): Promise<Blob> => {
       return new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.readAsDataURL(file);
@@ -235,17 +235,30 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
               img.onload = () => {
                   const canvas = document.createElement('canvas');
                   const MAX_WIDTH = 500;
-                  const scaleSize = MAX_WIDTH / img.width;
-                  const width = (img.width > MAX_WIDTH) ? MAX_WIDTH : img.width;
-                  const height = (img.width > MAX_WIDTH) ? img.height * scaleSize : img.height;
+                  
+                  // Calculate new dimensions
+                  let width = img.width;
+                  let height = img.height;
+                  
+                  if (width > MAX_WIDTH) {
+                      height = img.height * (MAX_WIDTH / img.width);
+                      width = MAX_WIDTH;
+                  }
 
                   canvas.width = width;
                   canvas.height = height;
+                  
                   const ctx = canvas.getContext('2d');
                   if (ctx) {
                       ctx.drawImage(img, 0, 0, width, height);
-                      // Compress to JPEG 0.7 quality
-                      resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+                      // Compress to JPEG 0.7 quality and get Blob
+                      canvas.toBlob((blob) => {
+                          if (blob) {
+                              resolve(blob);
+                          } else {
+                              reject(new Error("Canvas to Blob failed"));
+                          }
+                      }, 'image/jpeg', 0.7); 
                   } else {
                       reject(new Error("Canvas context failed"));
                   }
@@ -256,35 +269,51 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
       });
   };
 
+  // Helper for Base64 fallback
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(blob);
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+      });
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!storage || !e.target.files || e.target.files.length === 0) return;
     
-    const file = e.target.files[0];
-    setUploadStatus('Uploading...');
+    const originalFile = e.target.files[0];
+    setUploadStatus('Processing...');
     setIsUploading(true);
 
     try {
-        // 1. Try Firebase Storage First
-        const storageRef = ref(storage, `card-images/${Date.now()}_${file.name}`);
-        const snapshot = await uploadBytes(storageRef, file);
-        const url = await getDownloadURL(snapshot.ref);
-        setEditFormData(prev => ({ ...prev, image: url }));
-        setUploadStatus('Success (Storage)');
-    } catch (error: any) {
-        console.warn("Storage upload failed (likely permission), attempting fallback...", error);
+        // Step 1: Compress locally first to avoid uploading huge files
+        const compressedBlob = await compressImageToBlob(originalFile);
         
-        // 2. Fallback to Compressed Base64
+        // Step 2: Try Firebase Storage Upload with the compressed blob
         try {
-            const base64String = await compressImage(file);
-            setEditFormData(prev => ({ ...prev, image: base64String }));
-            setUploadStatus('Success (Local Save)');
-            // Gentle notification instead of alert
-            console.log("Storage permission denied. Saved image directly to card data (compressed).");
-        } catch (b64Error) {
-            console.error("Image compression failed", b64Error);
-            setUploadStatus('Failed');
-            alert("画像の読み込みに失敗しました。");
+            const fileName = originalFile.name.replace(/\.[^/.]+$/, "") + ".jpg"; // Ensure .jpg extension
+            const storageRef = ref(storage, `card-images/${Date.now()}_${fileName}`);
+            
+            setUploadStatus('Uploading...');
+            const snapshot = await uploadBytes(storageRef, compressedBlob);
+            const url = await getDownloadURL(snapshot.ref);
+            
+            setEditFormData(prev => ({ ...prev, image: url }));
+            setUploadStatus('Success (Storage)');
+        } catch (storageError) {
+             console.warn("Storage upload failed (likely permission), falling back to Base64...", storageError);
+             
+             // Step 3: Fallback - Use Base64 of the COMPRESSED image (lightweight)
+             const base64String = await blobToBase64(compressedBlob);
+             setEditFormData(prev => ({ ...prev, image: base64String }));
+             setUploadStatus('Success (Local Save)');
+             console.log("Storage permission denied. Saved image directly to card data (compressed).");
         }
+    } catch (error) {
+        console.error("Image processing failed", error);
+        setUploadStatus('Failed');
+        alert("画像の処理に失敗しました。");
     } finally {
         setIsUploading(false);
     }
@@ -550,7 +579,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
                                 />
                                 <div className="flex items-center gap-2">
                                     <label className={`text-xs px-3 py-2 rounded cursor-pointer transition-colors w-full text-center border ${isUploading ? 'bg-gray-700 text-gray-500 border-gray-700 cursor-not-allowed' : 'bg-blue-900/50 hover:bg-blue-800 border-blue-600 text-blue-200'}`}>
-                                        {isUploading ? 'Uploading...' : 'Upload Image'}
+                                        {isUploading ? 'Processing & Uploading...' : 'Upload Image (Auto Resize)'}
                                         <input 
                                             type="file" 
                                             accept="image/*" 

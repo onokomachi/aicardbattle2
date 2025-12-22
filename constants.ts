@@ -5,7 +5,7 @@ export const INITIAL_HP = 20;
 export const HAND_SIZE = 5;
 export const DECK_SIZE = 20;
 export const MAX_DUPLICATES = 4;
-export const INITIAL_UNLOCKED_CARDS: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+export const INITIAL_UNLOCKED_CARDS: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 19];
 
 // 管理者のメールアドレスリスト。ここにメールアドレスを追加すると、そのユーザーだけがGameMasterボタンを見ることができます。
 // 空配列の場合は、ログインしている全てのユーザーにボタンが表示されます（開発用）。
@@ -142,7 +142,7 @@ export const CARD_DEFINITIONS: CardData[] = ([
     attribute: 'calm',
     baseDefinitionId: 9,
   },
-  // --- Leveled Cards (Definition IDs 10+) ---
+  // --- Leveled Cards (Definition IDs 10-15) ---
   {
     name: "至高の貴族",
     attack: 8,
@@ -218,6 +218,54 @@ export const CARD_DEFINITIONS: CardData[] = ([
     level: 3,
     baseDefinitionId: 2,
   },
+  // --- New Cards with Discard Ability (Definition IDs 16-19) ---
+  {
+    name: "怪盗ブラック・ルナ",
+    attack: 5,
+    defense: 3,
+    image: "1.jpeg",
+    description: "影に潜み、相手の手札を1枚奪い去る。",
+    effect: 'DISCARD_HAND',
+    effectValue: 1,
+    attribute: 'calm',
+    level: 1,
+    baseDefinitionId: 16,
+  },
+  {
+    name: "禁忌の魔術師",
+    attack: 4,
+    defense: 4,
+    image: "5.jpeg",
+    description: "禁じられた術で、相手の思考（手札）を1つ消去する。",
+    effect: 'DISCARD_HAND',
+    effectValue: 1,
+    attribute: 'passion',
+    level: 1,
+    baseDefinitionId: 17,
+  },
+  {
+    name: "深淵の観測者",
+    attack: 2,
+    defense: 8,
+    image: "9.jpeg",
+    description: "深淵からの視線。相手を萎縮させ、手札を捨てさせる。",
+    effect: 'NONE',
+    attribute: 'harmony',
+    level: 1,
+    baseDefinitionId: 18,
+  },
+  {
+    name: "運命の裁定者",
+    attack: 6,
+    defense: 2,
+    image: "12.jpeg",
+    description: "冷徹な審判。相手の手札を2枚、強制的に破棄させる。",
+    effect: 'DISCARD_HAND',
+    effectValue: 2,
+    attribute: 'calm',
+    level: 2,
+    baseDefinitionId: 19,
+  }
 ] as Omit<CardData, 'id' | 'definitionId'>[]).map((card, index) => ({ ...card, definitionId: index, id: index }));
 
 export const CardCatalogById = CARD_DEFINITIONS.reduce((acc, card) => {

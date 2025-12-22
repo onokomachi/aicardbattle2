@@ -218,7 +218,6 @@ const App: React.FC = () => {
   }, []);
 
   // --- Login and Logout Helpers ---
-  // Fix: Implemented handleLogin and handleLogout to resolve missing name errors.
   const handleLogin = async () => {
     if (!auth || !googleProvider) return;
     try {
@@ -241,7 +240,6 @@ const App: React.FC = () => {
   };
 
   // --- Admin Access Check ---
-  // Fix: Implemented canAccessGameMaster logic to fix missing name error.
   const canAccessGameMaster = useMemo(() => {
     if (ADMIN_EMAILS.length === 0) return true; // Empty list allows all for dev purposes
     return user && user.email && ADMIN_EMAILS.includes(user.email);
@@ -390,10 +388,40 @@ const App: React.FC = () => {
     if (playerPlayedCard.effect === 'DIRECT_DAMAGE') dPc += playerPlayedCard.effectValue || 0;
     else if (playerPlayedCard.effect === 'HEAL_PLAYER') pHeal = playerPlayedCard.effectValue || 0;
     else if (playerPlayedCard.effect === 'DRAW_CARD') pDraw = playerPlayedCard.effectValue || 0;
+    else if (playerPlayedCard.effect === 'DISCARD_HAND') {
+      const discardCount = playerPlayedCard.effectValue || 1;
+      setPcHand(prev => {
+        if (prev.length === 0) return prev;
+        const newHand = [...prev];
+        for (let i = 0; i < discardCount; i++) {
+          if (newHand.length === 0) break;
+          const randomIndex = Math.floor(Math.random() * newHand.length);
+          newHand.splice(randomIndex, 1);
+        }
+        return newHand;
+      });
+      addLog(`あなたの「${playerPlayedCard.name}」の効果！相手の手札を捨てさせた！`);
+      setPlayerIsCasting(true);
+    }
     
     if (pcPlayedCard.effect === 'DIRECT_DAMAGE') dP += pcPlayedCard.effectValue || 0;
     else if (pcPlayedCard.effect === 'HEAL_PLAYER') pcHeal = pcPlayedCard.effectValue || 0;
     else if (pcPlayedCard.effect === 'DRAW_CARD') pcDraw = pcPlayedCard.effectValue || 0;
+    else if (pcPlayedCard.effect === 'DISCARD_HAND') {
+      const discardCount = pcPlayedCard.effectValue || 1;
+      setPlayerHand(prev => {
+        if (prev.length === 0) return prev;
+        const newHand = [...prev];
+        for (let i = 0; i < discardCount; i++) {
+          if (newHand.length === 0) break;
+          const randomIndex = Math.floor(Math.random() * newHand.length);
+          newHand.splice(randomIndex, 1);
+        }
+        return newHand;
+      });
+      addLog(`相手の「${pcPlayedCard.name}」の効果！あなたの手札が捨てられた！`);
+      setPcIsCasting(true);
+    }
 
     if (matchup === 'advantage') dPc += Math.max(0, playerPlayedCard.attack - cDef);
     else if (matchup === 'disadvantage') dP += Math.max(0, pcPlayedCard.attack - pDef);
@@ -435,7 +463,7 @@ const App: React.FC = () => {
        }
     }
     if (!didLvUp) setTimeout(finishBattle, 1800);
-  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, drawCards, levelUpMap, gameMode, isHost, currentRoomId, cardCatalog]);
+  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, drawCards, levelUpMap, gameMode, isHost, currentRoomId, cardCatalog, addLog]);
 
   useEffect(() => { if (turnPhase === 'resolution_phase') setTimeout(() => setTurnPhase('battle_animation'), 400); }, [turnPhase]);
   useEffect(() => { if (turnPhase === 'battle_animation') resolveBattle(); }, [turnPhase, resolveBattle]);

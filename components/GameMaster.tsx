@@ -633,6 +633,7 @@ const GameMaster: React.FC<GameMasterProps> = ({ db, storage, onClose }) => {
                                 <option value="PIERCING">PIERCING (貫通/防御無視)</option>
                                 <option value="REFLECT">REFLECT (反射/カウンター)</option>
                                 <option value="RECOIL">RECOIL (捨て身/自傷攻撃)</option>
+                                <option value="DISCARD_HAND">DISCARD_HAND (相手のカードを捨てる)</option>
                             </select>
                         </div>
                          <div>

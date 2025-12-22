@@ -59,17 +59,24 @@ const Shop: React.FC<ShopProps> = ({ coins, allCards, onBuyPack, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center text-white p-4">
+    <div className="fixed inset-0 bg-black/95 z-50 flex flex-col items-center justify-center text-white p-4">
       {/* Header */}
       <div className="absolute top-0 w-full p-4 flex justify-between items-center bg-gray-900 border-b border-gray-700">
          <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-bold text-amber-400">カードショップ</h2>
-            <div className="bg-gray-800 px-4 py-1 rounded-full border border-amber-500/50 flex items-center gap-2">
-                <span>💰</span>
-                <span className="font-mono text-xl">{coins}</span>
+            <h2 className="text-xl sm:text-2xl font-bold text-amber-400">カードショップ</h2>
+            <div className="bg-gray-800 px-3 py-1 rounded-full border border-amber-500/50 flex items-center gap-2">
+                <span className="text-sm">💰</span>
+                <span className="font-mono text-lg sm:text-xl">{coins}</span>
             </div>
          </div>
-         <button onClick={onClose} disabled={isOpening} className="text-gray-400 hover:text-white text-2xl">✕</button>
+         <button 
+           onClick={onClose} 
+           disabled={isOpening} 
+           className="text-gray-400 hover:text-white flex items-center gap-1 transition-colors group"
+         >
+            <span className="text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity">閉じる</span>
+            <span className="text-2xl">✕</span>
+         </button>
       </div>
 
       <div className="flex-grow flex items-center justify-center w-full max-w-5xl">
@@ -77,16 +84,25 @@ const Shop: React.FC<ShopProps> = ({ coins, allCards, onBuyPack, onClose }) => {
              <div className="flex flex-col items-center gap-8 animate-level-up-reveal">
                  <div className="relative group cursor-pointer" onClick={handleBuy}>
                     <div className="absolute inset-0 bg-amber-500 blur-xl opacity-20 group-hover:opacity-40 transition-opacity rounded-full"></div>
-                    <div className="w-64 h-80 bg-gradient-to-br from-gray-800 to-gray-900 border-4 border-amber-500 rounded-xl flex flex-col items-center justify-center shadow-2xl transform group-hover:scale-105 transition-transform">
-                        <div className="text-6xl mb-4">🎴</div>
-                        <h3 className="text-2xl font-bold text-white mb-2">スタンダードパック</h3>
-                        <p className="text-gray-400 text-sm mb-4">全種類のカードが出現</p>
+                    <div className="w-56 h-72 sm:w-64 sm:h-80 bg-gradient-to-br from-gray-800 to-gray-900 border-4 border-amber-500 rounded-xl flex flex-col items-center justify-center shadow-2xl transform group-hover:scale-105 transition-transform">
+                        <div className="text-5xl sm:text-6xl mb-4">🎴</div>
+                        <h3 className="text-xl sm:text-2xl font-bold text-white mb-2">スタンダードパック</h3>
+                        <p className="text-gray-400 text-xs sm:text-sm mb-4">全種類のカードが出現</p>
                         <div className="bg-black/50 px-4 py-2 rounded text-amber-300 font-bold border border-amber-500/30">
                             {PACK_COST} コイン
                         </div>
                     </div>
                  </div>
-                 <p className="text-gray-400">クリックして購入 (3枚入り)</p>
+                 
+                 <div className="flex flex-col items-center gap-4">
+                    <p className="text-gray-400 text-sm">クリックして購入 (3枚入り)</p>
+                    <button 
+                      onClick={onClose}
+                      className="mt-4 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-10 rounded-xl border border-gray-600 transition-all hover:scale-105 shadow-lg flex items-center gap-2"
+                    >
+                      <span>⬅️</span> デッキ構築に戻る
+                    </button>
+                 </div>
              </div>
          )}
 
@@ -112,7 +128,6 @@ const Shop: React.FC<ShopProps> = ({ coins, allCards, onBuyPack, onClose }) => {
                                         RARE
                                     </div>
                                 )}
-                                { /* New Badge check could be done if we tracked owned cards, simplified for now */ }
                              </div>
                          </div>
                      ))}

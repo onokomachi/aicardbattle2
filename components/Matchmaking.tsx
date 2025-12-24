@@ -29,8 +29,10 @@ const Matchmaking: React.FC<MatchmakingProps> = ({ rooms, onJoinRoom, onCancel, 
                 ? 'bg-amber-900/80 border-amber-400 text-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.5)] animate-pulse'
                 : 'bg-gray-800 hover:bg-gray-700 border-gray-600 text-gray-300',
             icon: isMyRoom ? '⏳' : '🚪',
-            isClickable: !isLocked, // ロックされてなければクリック可
-            isLocked: isLocked
+            // 自分がホストとして既に入っているなら再度クリックする必要はない
+            isClickable: !isLocked && !isMyRoom, 
+            isLocked: isLocked,
+            isMyRoom: isMyRoom
         };
     }
     
@@ -42,8 +44,9 @@ const Matchmaking: React.FC<MatchmakingProps> = ({ rooms, onJoinRoom, onCancel, 
                  ? 'bg-amber-900/80 border-amber-400 text-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.5)] animate-pulse'
                  : 'bg-green-900/80 hover:bg-green-800 border-green-500 text-green-200 animate-pulse',
             icon: isMyRoom ? '⏳' : '👤',
-            isClickable: !isLocked,
-            isLocked: isLocked
+            isClickable: !isLocked && !isMyRoom,
+            isLocked: isLocked,
+            isMyRoom: isMyRoom
         };
     }
     
@@ -53,7 +56,8 @@ const Matchmaking: React.FC<MatchmakingProps> = ({ rooms, onJoinRoom, onCancel, 
         styleClass: 'bg-red-900/50 border-red-800 text-red-400 opacity-60 cursor-not-allowed',
         icon: '⚔️',
         isClickable: false,
-        isLocked: isLocked
+        isLocked: isLocked,
+        isMyRoom: isMyRoom
     };
   };
 
@@ -97,9 +101,15 @@ const Matchmaking: React.FC<MatchmakingProps> = ({ rooms, onJoinRoom, onCancel, 
                             ${info.styleClass}
                             ${info.isClickable ? 'cursor-pointer hover:scale-105 hover:shadow-lg hover:shadow-amber-500/20' : ''}
                             ${info.isLocked ? 'opacity-40 cursor-not-allowed grayscale' : ''}
+                            ${info.isMyRoom ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-gray-900 scale-105 z-10' : ''}
                         `}
                      >
                         <div className="absolute top-2 left-3 font-mono text-xs opacity-50">{roomId.replace('room-', 'NO.')}</div>
+                        {info.isMyRoom && (
+                          <div className="absolute -top-3 -right-3 bg-amber-500 text-black text-[10px] font-bold px-2 py-1 rounded shadow-lg animate-bounce">
+                            YOU ARE HERE
+                          </div>
+                        )}
                         <div className="text-4xl filter drop-shadow-md">{info.icon}</div>
                         <div className="font-bold text-lg tracking-wider">ROOM {roomId.replace('room-', '')}</div>
                         <div className="text-xs font-bold px-3 py-1 rounded-full bg-black/40 backdrop-blur-sm">

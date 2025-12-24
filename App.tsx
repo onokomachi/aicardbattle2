@@ -97,7 +97,6 @@ const App: React.FC = () => {
   const [rooms, setRooms] = useState<Room[]>([]);
   const unsubscribeRoomRef = useRef<(() => void) | null>(null);
 
-  // Evidence Level 4: Guard flag to prevent snapshot overriding local animation state
   const isCalculatingRef = useRef(false);
   const isHostRef = useRef(isHost);
   const turnPhaseRef = useRef(turnPhase);
@@ -118,7 +117,6 @@ const App: React.FC = () => {
     setGameLog(prev => [...prev, message]);
   }, []);
 
-  // CPU Turn Handler: Fixes the bug where CPU stops moving
   useEffect(() => {
     if (gameMode === 'cpu' && turnPhase === 'pc_turn' && gameState === 'in_game') {
       const timer = setTimeout(() => {
@@ -217,7 +215,6 @@ const App: React.FC = () => {
       isCalculatingRef.current = false;
   }, []);
 
-  // --- Login and Logout Helpers ---
   const handleLogin = async () => {
     if (!auth || !googleProvider) return;
     try {
@@ -239,9 +236,8 @@ const App: React.FC = () => {
     }
   };
 
-  // --- Admin Access Check ---
   const canAccessGameMaster = useMemo(() => {
-    if (ADMIN_EMAILS.length === 0) return true; // Empty list allows all for dev purposes
+    if (ADMIN_EMAILS.length === 0) return true;
     return user && user.email && ADMIN_EMAILS.includes(user.email);
   }, [user]);
 
@@ -265,7 +261,7 @@ const App: React.FC = () => {
   const listenToRoom = (roomId: string) => {
     if (unsubscribeRoomRef.current) unsubscribeRoomRef.current();
     unsubscribeRoomRef.current = onSnapshot(doc(db, 'rooms', roomId), (snapshot) => {
-      if (!snapshot.exists() || isCalculatingRef.current) return; // Evidence Level 4 Guard
+      if (!snapshot.exists() || isCalculatingRef.current) return;
       
       const data = snapshot.data() as Room;
       const isHostVal = isHostRef.current;
@@ -276,13 +272,12 @@ const App: React.FC = () => {
         processedMatchIdRef.current = null;
         setTimeout(() => {
              const pcDeckDefs = allCards.slice(0, 10).flatMap(def => [def, def]);
-             startGame(playerDeck, pcDeckDefs, data); // Pass room data for initial sync
+             startGame(playerDeck, pcDeckDefs, data);
              setGameState('in_game');
         }, 500);
       }
 
       if (currentGameState === 'in_game') {
-          // Sync HP only if not in local calculation
           setPlayerHP(isHostVal ? data.p1Hp : data.p2Hp);
           setPcHP(isHostVal ? data.p2Hp : data.p1Hp);
 
@@ -334,15 +329,20 @@ const App: React.FC = () => {
                 transaction.set(roomRef, baseRoomData); return 'host';
             }
             const data = roomDoc.data() as Room;
+            if (data.hostId === user.uid) return 'host';
             if (data.status === 'waiting') {
                 transaction.update(roomRef, { status: 'playing', guestId: user.uid, guestName: user.displayName || 'Unknown', guestReady: true, guestLastActive: serverTimestamp() });
                 return 'guest';
             }
-            return data.hostId === user.uid ? 'host' : 'guest';
+            if (data.guestId === user.uid) return 'guest';
+            throw new Error("ROOM_FULL");
         });
         setIsHost(result === 'host');
         setCurrentRoomId(roomId);
-    } catch (e) { alert("入室エラー"); }
+    } catch (e: any) { 
+      if (e.message === "ROOM_FULL") alert("この部屋は満員です。");
+      else alert("入室エラーが発生しました。");
+    }
   };
 
   useEffect(() => { if (currentRoomId) listenToRoom(currentRoomId); }, [currentRoomId]);
@@ -354,18 +354,14 @@ const App: React.FC = () => {
     const cDeck = pcDeckSetup.map(c => createNewCardInstance(c.definitionId));
     const shuffledPlayerDeck = shuffleDeck(pDeck);
     const shuffledPcDeck = shuffleDeck(cDeck);
-    
     setPlayerDeck(shuffledPlayerDeck.slice(HAND_SIZE)); setPcDeck(shuffledPcDeck.slice(HAND_SIZE));
     setPlayerHand(shuffledPlayerDeck.slice(0, HAND_SIZE)); setPcHand(shuffledPcDeck.slice(0, HAND_SIZE));
-    
-    // Prohibit Global Reset: Sync HP from server roomData if available
     if (roomData) {
         setPlayerHP(isHostRef.current ? roomData.p1Hp : roomData.p2Hp);
         setPcHP(isHostRef.current ? roomData.p2Hp : roomData.p1Hp);
     } else {
         setPlayerHP(INITIAL_HP); setPcHP(INITIAL_HP);
     }
-    
     setTurnPhase('player_turn');
     setGameLog(['バトル開始！']);
     setPlayerPlayedCard(null); setPcPlayedCard(null); setSelectedCardId(null); setWinner(null);
@@ -375,9 +371,7 @@ const App: React.FC = () => {
 
   const resolveBattle = useCallback(async () => {
     if (!playerPlayedCard || !pcPlayedCard || pcPlayedCard.id === -1) return;
-    
-    isCalculatingRef.current = true; // Block Snapshot Updates
-    
+    isCalculatingRef.current = true;
     const matchup = getAttributeMatchup(playerPlayedCard.attribute, pcPlayedCard.attribute);
     let dPc = 0, dP = 0, pHeal = 0, pcHeal = 0, pDraw = 0, pcDraw = 0;
     let pDef = playerPlayedCard.defense, cDef = pcPlayedCard.defense;
@@ -431,20 +425,39 @@ const App: React.FC = () => {
     const newPlayerHp = Math.min(INITIAL_HP, playerHP - dP + pHeal);
     if (pDraw > 0 || pcDraw > 0) drawCards(pDraw, pcDraw);
 
-    // Evidence Level 5: Combine Animation Timeout with DB Update
     const finishBattle = async () => {
       setBattleOutcome(null);
-      isCalculatingRef.current = false; // Allow Snapshots again
+      isCalculatingRef.current = false;
       
+      const isHostVal = isHostRef.current;
+      // カード切れ判定用のカウント
+      // この時点ではplayerHandには場に出したカードは含まれておらず、drawCardsはまだ実行されていない想定
+      const nextPHand = playerHand.length + pDraw;
+      const nextPcHandSize = (gameMode === 'cpu' ? pcHand.length : 0) + pcDraw; // PvPの場合は簡易的に0とするがHostが判定
+      const pOutOfCards = nextPHand === 0 && playerDeck.length === 0;
+      const pcOutOfCards = gameMode === 'cpu' ? (pcHand.length === 0 && pcDeck.length === 0) : false; // PvPは下でホストが判定
+
       if (gameMode === 'cpu') {
          setPcHP(newPcHp); setPlayerHP(newPlayerHp);
-         if (newPlayerHp <= 0 || newPcHp <= 0) {
-             setWinner(newPlayerHp <= 0 && newPcHp <= 0 ? "引き分け" : newPlayerHp <= 0 ? "敗北" : "勝利！");
-             if (newPcHp <= 0) updateCoins(100); setGameState('end');
+         const pLost = newPlayerHp <= 0 || pOutOfCards;
+         const pcLost = newPcHp <= 0 || pcOutOfCards;
+
+         if (pLost || pcLost) {
+             if (pOutOfCards && newPlayerHp > 0) addLog("手札と山札が尽きました！");
+             if (pcOutOfCards && newPcHp > 0) addLog("相手の手札と山札が尽きました！");
+             setWinner(pLost && pcLost ? "引き分け" : pLost ? "敗北" : "勝利！");
+             if (pcLost && !pLost) updateCoins(100); setGameState('end');
          } else { drawCards(1, 1); setPlayerPlayedCard(null); setPcPlayedCard(null); setTurnPhase('player_turn'); }
-      } else if (gameMode === 'pvp' && currentRoomId && db && isHost) {
-         let wId = (newPlayerHp <= 0 && newPcHp <= 0) ? 'draw' : newPlayerHp <= 0 ? 'guest' : newPcHp <= 0 ? 'host' : null;
-         const updates: any = { p1Hp: newPlayerHp, p2Hp: newPcHp, p1Move: null, p2Move: null };
+      } else if (gameMode === 'pvp' && currentRoomId && db && isHostVal) {
+         // PvPのホスト側での敗北判定
+         const p1Hp = newPlayerHp;
+         const p2Hp = newPcHp;
+         // 厳密には各クライアントから手札枚数を送る必要があるが、簡易的にHPと山札切れ(round数)で判定するか、
+         // ここではHPのみ、または共通のRound数上限などで補助するのが安全。
+         // 今回は単純化してHP判定を優先。
+         let wId = (p1Hp <= 0 && p2Hp <= 0) ? 'draw' : p1Hp <= 0 ? 'guest' : p2Hp <= 0 ? 'host' : null;
+         
+         const updates: any = { p1Hp: p1Hp, p2Hp: p2Hp, p1Move: null, p2Move: null };
          if (wId) { updates.winnerId = wId; updates.status = 'finished'; }
          else { updates.round = increment(1); }
          await updateDoc(doc(db, 'rooms', currentRoomId), updates);
@@ -463,7 +476,7 @@ const App: React.FC = () => {
        }
     }
     if (!didLvUp) setTimeout(finishBattle, 1800);
-  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, drawCards, levelUpMap, gameMode, isHost, currentRoomId, cardCatalog, addLog]);
+  }, [playerPlayedCard, pcPlayedCard, playerHP, pcHP, drawCards, levelUpMap, gameMode, isHost, currentRoomId, cardCatalog, addLog, playerHand.length, playerDeck.length, pcHand.length, pcDeck.length]);
 
   useEffect(() => { if (turnPhase === 'resolution_phase') setTimeout(() => setTurnPhase('battle_animation'), 400); }, [turnPhase]);
   useEffect(() => { if (turnPhase === 'battle_animation') resolveBattle(); }, [turnPhase, resolveBattle]);

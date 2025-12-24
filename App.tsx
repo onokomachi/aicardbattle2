@@ -316,25 +316,44 @@ const App: React.FC = () => {
     cleanupGameSession(false);
     try {
         const roomRef = doc(db, 'rooms', roomId);
+        const userUid = user.uid.trim();
+
         const result = await runTransaction(db, async (transaction) => {
             const roomDoc = await transaction.get(roomRef);
             const baseRoomData = {
-                roomId, status: 'waiting', hostId: user.uid, hostName: user.displayName || 'Unknown',
+                roomId, status: 'waiting', hostId: userUid, hostName: user.displayName || 'Unknown',
                 guestId: null, guestName: null, createdAt: serverTimestamp(), hostLastActive: serverTimestamp(),
                 guestLastActive: null, hostReady: true, guestReady: false, round: 1, p1Move: null, p2Move: null,
                 p1Hp: INITIAL_HP, p2Hp: INITIAL_HP, winnerId: null
             };
 
             if (!roomDoc.exists() || (roomDoc.data() as Room).status === 'finished') {
-                transaction.set(roomRef, baseRoomData); return 'host';
+                transaction.set(roomRef, baseRoomData); 
+                return 'host';
             }
+
             const data = roomDoc.data() as Room;
-            if (data.hostId === user.uid) return 'host';
+            const existingHostId = (data.hostId || '').trim();
+            const existingGuestId = (data.guestId || '').trim();
+
+            // 自分がホストとして既に入っているならホストとして復帰
+            if (existingHostId === userUid) return 'host';
+            
+            // 自分がゲストとして既に入っているならゲストとして復帰
+            if (existingGuestId === userUid) return 'guest';
+
+            // 空室（待ち状態）ならゲストとして参加
             if (data.status === 'waiting') {
-                transaction.update(roomRef, { status: 'playing', guestId: user.uid, guestName: user.displayName || 'Unknown', guestReady: true, guestLastActive: serverTimestamp() });
+                transaction.update(roomRef, { 
+                    status: 'playing', 
+                    guestId: userUid, 
+                    guestName: user.displayName || 'Unknown', 
+                    guestReady: true, 
+                    guestLastActive: serverTimestamp() 
+                });
                 return 'guest';
             }
-            if (data.guestId === user.uid) return 'guest';
+            
             throw new Error("ROOM_FULL");
         });
         setIsHost(result === 'host');
@@ -430,15 +449,12 @@ const App: React.FC = () => {
       isCalculatingRef.current = false;
       
       const isHostVal = isHostRef.current;
-      // カード切れ判定用のカウント
-      // この時点ではplayerHandには場に出したカードは含まれておらず、drawCardsはまだ実行されていない想定
       const nextPHand = playerHand.length + pDraw;
-      const nextPcHandSize = (gameMode === 'cpu' ? pcHand.length : 0) + pcDraw; // PvPの場合は簡易的に0とするがHostが判定
       const pOutOfCards = nextPHand === 0 && playerDeck.length === 0;
-      const pcOutOfCards = gameMode === 'cpu' ? (pcHand.length === 0 && pcDeck.length === 0) : false; // PvPは下でホストが判定
 
       if (gameMode === 'cpu') {
          setPcHP(newPcHp); setPlayerHP(newPlayerHp);
+         const pcOutOfCards = pcHand.length === 0 && pcDeck.length === 0;
          const pLost = newPlayerHp <= 0 || pOutOfCards;
          const pcLost = newPcHp <= 0 || pcOutOfCards;
 
@@ -449,12 +465,8 @@ const App: React.FC = () => {
              if (pcLost && !pLost) updateCoins(100); setGameState('end');
          } else { drawCards(1, 1); setPlayerPlayedCard(null); setPcPlayedCard(null); setTurnPhase('player_turn'); }
       } else if (gameMode === 'pvp' && currentRoomId && db && isHostVal) {
-         // PvPのホスト側での敗北判定
          const p1Hp = newPlayerHp;
          const p2Hp = newPcHp;
-         // 厳密には各クライアントから手札枚数を送る必要があるが、簡易的にHPと山札切れ(round数)で判定するか、
-         // ここではHPのみ、または共通のRound数上限などで補助するのが安全。
-         // 今回は単純化してHP判定を優先。
          let wId = (p1Hp <= 0 && p2Hp <= 0) ? 'draw' : p1Hp <= 0 ? 'guest' : p2Hp <= 0 ? 'host' : null;
          
          const updates: any = { p1Hp: p1Hp, p2Hp: p2Hp, p1Move: null, p2Move: null };
@@ -527,7 +539,7 @@ const App: React.FC = () => {
         <div className="relative z-10 w-full h-full">
             {gameState === 'login_screen' && <TopScreen currentUser={user} onLogin={handleLogin} onGuestPlay={() => setGameState('deck_building')} onStartGame={() => setGameState('deck_building')} onLogout={handleLogout} onOpenShop={() => setShowShop(true)} onOpenGameMaster={canAccessGameMaster ? () => { if (window.prompt('Pass?') === GAMEMASTER_PASSWORD) setGameState('gamemaster'); } : undefined} />}
             {gameState === 'deck_building' && <DeckBuilder unlockedCards={unlockedCardIds.map(id => cardCatalog[id]).filter(Boolean)} onDeckSubmit={(d, m) => { setPlayerDeck(d); setGameMode(m); setGameState(m === 'cpu' ? 'in_game' : 'matchmaking'); if(m==='cpu') startGame(d, allCards.slice(0, 10).flatMap(x=>[x,x])); }} isGuest={!user} savedDecks={savedDecks} onSaveDeck={handleSaveDeck} cardCatalog={cardCatalog} coins={coins} />}
-            {gameState === 'matchmaking' && <Matchmaking rooms={rooms} onJoinRoom={handleJoinRoom} onCancel={() => { cleanupGameSession(); setGameState('deck_building'); }} currentRoomId={currentRoomId} />}
+            {gameState === 'matchmaking' && <Matchmaking rooms={rooms} onJoinRoom={handleJoinRoom} onCancel={() => { cleanupGameSession(); setGameState('deck_building'); }} currentRoomId={currentRoomId} user={user} />}
             {gameState === 'in_game' && (
                 <>
                 <GameBoard turnPhase={turnPhase} playerHP={playerHP} pcHP={pcHP} playerHand={playerHand} pcHandSize={pcHand.length} pcAttributeCount={pcAttributeCount} playerDeckSize={playerDeck.length} pcDeckSize={pcDeck.length} playerPlayedCard={playerPlayedCard} pcPlayedCard={pcPlayedCard} onCardSelect={handleCardSelect} onBoardClick={handleBoardClick} selectedCardId={selectedCardId} gameLog={gameLog} playerIsCasting={playerIsCasting} pcIsCasting={pcIsCasting} battleOutcome={battleOutcome} />

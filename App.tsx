@@ -391,17 +391,79 @@ const App: React.FC = () => {
   const resolveBattle = useCallback(async () => {
     if (!playerPlayedCard || !pcPlayedCard || pcPlayedCard.id === -1) return;
     isCalculatingRef.current = true;
+    
+    // 1. 各種変数の初期化
     const matchup = getAttributeMatchup(playerPlayedCard.attribute, pcPlayedCard.attribute);
     let dPc = 0, dP = 0, pHeal = 0, pcHeal = 0, pDraw = 0, pcDraw = 0;
-    let pDef = playerPlayedCard.defense, cDef = pcPlayedCard.defense;
+    
+    // 計算用攻撃力/防御力のクローン
+    let pAtk = playerPlayedCard.attack;
+    let pDef = playerPlayedCard.defense;
+    let cAtk = pcPlayedCard.attack;
+    let cDef = pcPlayedCard.defense;
 
-    if (playerPlayedCard.effect === 'PIERCING') { cDef = 0; setPlayerIsCasting(true); }
-    if (pcPlayedCard.effect === 'PIERCING') { pDef = 0; setPcIsCasting(true); }
+    // 2. 特殊エフェクト（計算前フェーズ: SHIELD / BERSERK）
+    // Player SHIELD
+    if (playerPlayedCard.effect === 'SHIELD') {
+        pDef += playerPlayedCard.effectValue || 0;
+        setPlayerIsCasting(true);
+        addLog(`あなたの「${playerPlayedCard.name}」のシールド！防御力が上昇した！`);
+    }
+    // PC SHIELD
+    if (pcPlayedCard.effect === 'SHIELD') {
+        cDef += pcPlayedCard.effectValue || 0;
+        setPcIsCasting(true);
+        addLog(`相手の「${pcPlayedCard.name}」のシールド！防御力が上昇した！`);
+    }
 
-    if (playerPlayedCard.effect === 'DIRECT_DAMAGE') dPc += playerPlayedCard.effectValue || 0;
-    else if (playerPlayedCard.effect === 'HEAL_PLAYER') pHeal = playerPlayedCard.effectValue || 0;
-    else if (playerPlayedCard.effect === 'DRAW_CARD') pDraw = playerPlayedCard.effectValue || 0;
-    else if (playerPlayedCard.effect === 'DISCARD_HAND') {
+    // Player BERSERK
+    if (playerPlayedCard.effect === 'BERSERK' && playerHP <= 10) {
+        pAtk += playerPlayedCard.effectValue || 0;
+        setPlayerIsCasting(true);
+        addLog(`あなたの「${playerPlayedCard.name}」のバーサク！窮地で攻撃力が上昇した！`);
+    }
+    // PC BERSERK
+    if (pcPlayedCard.effect === 'BERSERK' && pcHP <= 10) {
+        cAtk += pcPlayedCard.effectValue || 0;
+        setPcIsCasting(true);
+        addLog(`相手の「${pcPlayedCard.name}」のバーサク！窮地で攻撃力が上昇した！`);
+    }
+
+    // PIERCING (貫通)
+    if (playerPlayedCard.effect === 'PIERCING') { cDef = 0; setPlayerIsCasting(true); addLog(`「${playerPlayedCard.name}」の貫通！`); }
+    if (pcPlayedCard.effect === 'PIERCING') { pDef = 0; setPcIsCasting(true); addLog(`「${pcPlayedCard.name}」の貫通！`); }
+
+    // 3. 基本ダメージ計算（属性マッチアップ適用）
+    if (matchup === 'advantage') {
+        dPc += Math.max(0, pAtk - cDef);
+    } else if (matchup === 'disadvantage') {
+        dP += Math.max(0, cAtk - pDef);
+    } else {
+        dPc += Math.max(0, pAtk - cDef);
+        dP += Math.max(0, cAtk - pDef);
+    }
+
+    // 4. 特殊エフェクト（計算中フェーズ: 直接ダメージ / 回復 / ドレイン等）
+    // Player Effects
+    if (playerPlayedCard.effect === 'DIRECT_DAMAGE') {
+        dPc += playerPlayedCard.effectValue || 0;
+        setPlayerIsCasting(true);
+    } else if (playerPlayedCard.effect === 'HEAL_PLAYER') {
+        pHeal += playerPlayedCard.effectValue || 0;
+        setPlayerIsCasting(true);
+    } else if (playerPlayedCard.effect === 'LIFE_DRAIN') {
+        const drain = playerPlayedCard.effectValue || 0;
+        dPc += drain;
+        pHeal += drain;
+        setPlayerIsCasting(true);
+        addLog(`「${playerPlayedCard.name}」のライフドレイン！${drain}吸収した！`);
+    } else if (playerPlayedCard.effect === 'RECOIL') {
+        dP += playerPlayedCard.effectValue || 0;
+        setPlayerIsCasting(true);
+        addLog(`「${playerPlayedCard.name}」の捨て身の攻撃！反動ダメージを受けた！`);
+    } else if (playerPlayedCard.effect === 'DRAW_CARD') {
+        pDraw = playerPlayedCard.effectValue || 0;
+    } else if (playerPlayedCard.effect === 'DISCARD_HAND') {
       const discardCount = playerPlayedCard.effectValue || 1;
       setPcHand(prev => {
         if (prev.length === 0) return prev;
@@ -416,11 +478,27 @@ const App: React.FC = () => {
       addLog(`あなたの「${playerPlayedCard.name}」の効果！相手の手札を捨てさせた！`);
       setPlayerIsCasting(true);
     }
-    
-    if (pcPlayedCard.effect === 'DIRECT_DAMAGE') dP += pcPlayedCard.effectValue || 0;
-    else if (pcPlayedCard.effect === 'HEAL_PLAYER') pcHeal = pcPlayedCard.effectValue || 0;
-    else if (pcPlayedCard.effect === 'DRAW_CARD') pcDraw = pcPlayedCard.effectValue || 0;
-    else if (pcPlayedCard.effect === 'DISCARD_HAND') {
+
+    // PC Effects
+    if (pcPlayedCard.effect === 'DIRECT_DAMAGE') {
+        dP += pcPlayedCard.effectValue || 0;
+        setPcIsCasting(true);
+    } else if (pcPlayedCard.effect === 'HEAL_PLAYER') {
+        pcHeal += pcPlayedCard.effectValue || 0;
+        setPcIsCasting(true);
+    } else if (pcPlayedCard.effect === 'LIFE_DRAIN') {
+        const drain = pcPlayedCard.effectValue || 0;
+        dP += drain;
+        pcHeal += drain;
+        setPcIsCasting(true);
+        addLog(`相手の「${pcPlayedCard.name}」のライフドレイン！${drain}吸収された！`);
+    } else if (pcPlayedCard.effect === 'RECOIL') {
+        dPc += pcPlayedCard.effectValue || 0;
+        setPcIsCasting(true);
+        addLog(`相手の「${pcPlayedCard.name}」の捨て身の攻撃！相手も反動を受けた！`);
+    } else if (pcPlayedCard.effect === 'DRAW_CARD') {
+        pcDraw = pcPlayedCard.effectValue || 0;
+    } else if (pcPlayedCard.effect === 'DISCARD_HAND') {
       const discardCount = pcPlayedCard.effectValue || 1;
       setPlayerHand(prev => {
         if (prev.length === 0) return prev;
@@ -436,10 +514,21 @@ const App: React.FC = () => {
       setPcIsCasting(true);
     }
 
-    if (matchup === 'advantage') dPc += Math.max(0, playerPlayedCard.attack - cDef);
-    else if (matchup === 'disadvantage') dP += Math.max(0, pcPlayedCard.attack - pDef);
-    else { dPc += Math.max(0, playerPlayedCard.attack - cDef); dP += Math.max(0, pcPlayedCard.attack - pDef); }
+    // 5. 特殊エフェクト（計算後フェーズ: REFLECT）
+    if (playerPlayedCard.effect === 'REFLECT' && dP > 0) {
+        const reflectVal = playerPlayedCard.effectValue || 0;
+        dPc += reflectVal;
+        setPlayerIsCasting(true);
+        addLog(`「${playerPlayedCard.name}」の反射！相手に${reflectVal}ダメージ！`);
+    }
+    if (pcPlayedCard.effect === 'REFLECT' && dPc > 0) {
+        const reflectVal = pcPlayedCard.effectValue || 0;
+        dP += reflectVal;
+        setPcIsCasting(true);
+        addLog(`相手の「${pcPlayedCard.name}」の反射！あなたに${reflectVal}ダメージ！`);
+    }
 
+    // 6. HPの最終確定
     const newPcHp = Math.min(INITIAL_HP, pcHP - dPc + pcHeal);
     const newPlayerHp = Math.min(INITIAL_HP, playerHP - dP + pHeal);
     if (pDraw > 0 || pcDraw > 0) drawCards(pDraw, pcDraw);

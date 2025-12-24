@@ -5,30 +5,14 @@ export const INITIAL_HP = 20;
 export const HAND_SIZE = 5;
 export const DECK_SIZE = 20;
 export const MAX_DUPLICATES = 4;
-export const INITIAL_UNLOCKED_CARDS: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 19];
+export const INITIAL_UNLOCKED_CARDS: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 19, 20, 21, 22, 23, 24];
 
 // 管理者のメールアドレスリスト。ここにメールアドレスを追加すると、そのユーザーだけがGameMasterボタンを見ることができます。
-// 空配列の場合は、ログインしている全てのユーザーにボタンが表示されます（開発用）。
-export const ADMIN_EMAILS: string[] = [
-    // "your-email@example.com"
-];
+export const ADMIN_EMAILS: string[] = [];
 
 export const GAMEMASTER_PASSWORD = '215124';
 
-
-// 注：このアプリを正しく動作させるには、プロジェクトのルートに`public`フォルダを作成し、
-// その中に`Image2`という名前のフォルダを配置してください。
-// 下の`image`プロパティの値は、そのフォルダ内のファイル名と完全に一致している必要があります。
-//
-// NOTE: To run this app correctly, create a `public` folder in the project root,
-// and place your `Image2` folder inside it. The `image` property values below
-// must exactly match the filenames within `/public/Image2/`.
-
 // This catalog contains all possible card DEFINITIONS.
-// The `id` property here is the card's definition ID, used for lookups and unlocks.
-// It is distinct from the instance ID assigned to each card in a deck during a game.
-// FIX: Changed the type of CARD_DEFINITIONS to CardData[] and cast the array literal.
-// This ensures the object properties match the CardData type and that the final array is correctly typed.
 export const CARD_DEFINITIONS: CardData[] = ([
   // --- Base Cards (Definition IDs 0-9) ---
   {
@@ -40,7 +24,7 @@ export const CARD_DEFINITIONS: CardData[] = ([
     effect: 'NONE',
     attribute: 'passion',
     level: 1,
-    unlocks: 10, // Unlocks "至高の貴族"
+    unlocks: 10,
     baseDefinitionId: 0,
   },
   {
@@ -53,7 +37,7 @@ export const CARD_DEFINITIONS: CardData[] = ([
     effectValue: 3,
     attribute: 'harmony',
     level: 1,
-    unlocks: 11, // Unlocks "永遠の花嫁"
+    unlocks: 11,
     baseDefinitionId: 1,
   },
   {
@@ -65,7 +49,7 @@ export const CARD_DEFINITIONS: CardData[] = ([
     effect: 'NONE',
     attribute: 'harmony',
     level: 1,
-    unlocks: 12, // Unlocks "センターアイドル"
+    unlocks: 12,
     baseDefinitionId: 2,
   },
   {
@@ -153,7 +137,7 @@ export const CARD_DEFINITIONS: CardData[] = ([
     effectValue: 1,
     attribute: 'passion',
     level: 2,
-    unlocks: 13, // Unlocks "気高き皇帝"
+    unlocks: 13,
     baseDefinitionId: 0,
   },
   {
@@ -166,7 +150,7 @@ export const CARD_DEFINITIONS: CardData[] = ([
     effectValue: 5,
     attribute: 'harmony',
     level: 2,
-    unlocks: 14, // Unlocks "女神の花嫁"
+    unlocks: 14,
     baseDefinitionId: 1,
   },
   {
@@ -179,7 +163,7 @@ export const CARD_DEFINITIONS: CardData[] = ([
     effectValue: 1,
     attribute: 'harmony',
     level: 2,
-    unlocks: 15, // Unlocks "伝説のアイドル"
+    unlocks: 15,
     baseDefinitionId: 2,
   },
   {
@@ -218,17 +202,16 @@ export const CARD_DEFINITIONS: CardData[] = ([
     level: 3,
     baseDefinitionId: 2,
   },
-  // --- New Cards with Discard Ability (Definition IDs 16-19) ---
+  // --- Special Effect Cards (Definition IDs 16-24) ---
   {
     name: "怪盗ブラック・ルナ",
     attack: 5,
     defense: 3,
     image: "1.jpeg",
-    description: "影に潜み、相手の手札を1枚奪い去る。",
+    description: "相手の手札を1枚奪い去る。",
     effect: 'DISCARD_HAND',
     effectValue: 1,
     attribute: 'calm',
-    level: 1,
     baseDefinitionId: 16,
   },
   {
@@ -236,35 +219,78 @@ export const CARD_DEFINITIONS: CardData[] = ([
     attack: 4,
     defense: 4,
     image: "5.jpeg",
-    description: "禁じられた術で、相手の思考（手札）を1つ消去する。",
+    description: "相手の手札を1枚捨てさせる。",
     effect: 'DISCARD_HAND',
     effectValue: 1,
     attribute: 'passion',
-    level: 1,
     baseDefinitionId: 17,
-  },
-  {
-    name: "深淵の観測者",
-    attack: 2,
-    defense: 8,
-    image: "9.jpeg",
-    description: "深淵からの視線。相手を萎縮させ、手札を捨てさせる。",
-    effect: 'NONE',
-    attribute: 'harmony',
-    level: 1,
-    baseDefinitionId: 18,
   },
   {
     name: "運命の裁定者",
     attack: 6,
     defense: 2,
     image: "12.jpeg",
-    description: "冷徹な審判。相手の手札を2枚、強制的に破棄させる。",
+    description: "相手の手札を2枚破棄させる。",
     effect: 'DISCARD_HAND',
     effectValue: 2,
     attribute: 'calm',
     level: 2,
     baseDefinitionId: 19,
+  },
+  {
+    name: "紅蓮の吸血鬼",
+    attack: 6,
+    defense: 4,
+    image: "7.jpeg",
+    description: "ライフドレイン！相手から2HPを吸収する。",
+    effect: 'LIFE_DRAIN',
+    effectValue: 2,
+    attribute: 'passion',
+    baseDefinitionId: 20,
+  },
+  {
+    name: "聖なる守護者",
+    attack: 3,
+    defense: 6,
+    image: "9.jpeg",
+    description: "シールド！発動時、防御力を+4する。",
+    effect: 'SHIELD',
+    effectValue: 4,
+    attribute: 'harmony',
+    baseDefinitionId: 21,
+  },
+  {
+    name: "虚飾の鏡",
+    attack: 2,
+    defense: 10,
+    image: "5.jpeg",
+    description: "反射！ダメージを受けた時、相手に3ダメージ返す。",
+    effect: 'REFLECT',
+    effectValue: 3,
+    attribute: 'calm',
+    baseDefinitionId: 22,
+  },
+  {
+    name: "狂乱の戦士",
+    attack: 5,
+    defense: 3,
+    image: "13.jpeg",
+    description: "バーサク！自分のHPが10以下なら、攻撃力が+5される。",
+    effect: 'BERSERK',
+    effectValue: 5,
+    attribute: 'passion',
+    baseDefinitionId: 23,
+  },
+  {
+    name: "漆黒の騎士",
+    attack: 12,
+    defense: 0,
+    image: "1.jpeg",
+    description: "反動！絶大な攻撃力を持つが、自分も2ダメージ受ける。",
+    effect: 'RECOIL',
+    effectValue: 2,
+    attribute: 'calm',
+    baseDefinitionId: 24,
   }
 ] as Omit<CardData, 'id' | 'definitionId'>[]).map((card, index) => ({ ...card, definitionId: index, id: index }));
 
